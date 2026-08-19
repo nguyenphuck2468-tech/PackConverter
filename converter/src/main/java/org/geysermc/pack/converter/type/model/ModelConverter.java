@@ -237,24 +237,22 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
 
     @Override
     public void include(BedrockResourcePack pack, List<BedrockModel> bedrockModels, CombineContext context) {
-        List<String> entityModels = new ArrayList<>();
-        List<String> blockModels = new ArrayList<>();
+        Set<String> entityModels = new HashSet<>();
+        Set<String> blockModels = new HashSet<>();
         for (BedrockModel model : bedrockModels) {
             switch (model.type()) {
                 case ENTITY -> {
-                    if (entityModels.contains(model.fileName())) {
+                    if (!entityModels.add(model.fileName())) {
                         context.warn("Conflicting entity model " + model.fileName() + "!");
                         continue;
                     }
-                    entityModels.add(model.fileName());
                     pack.addEntityModel(model.model(), model.fileName());
                 }
                 case BLOCK -> {
-                    if (blockModels.contains(model.fileName())) {
+                    if (!blockModels.add(model.fileName())) {
                         context.warn("Conflicting block model " + model.fileName() + "!");
                         continue;
                     }
-                    blockModels.add(model.fileName());
                     pack.addBlockModel(model.model(), model.fileName());
                 }
             }
