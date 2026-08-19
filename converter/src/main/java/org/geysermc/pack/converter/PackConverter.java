@@ -51,100 +51,44 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 
-/**
- * Handles the conversion of a resource pack.
- */
+/** Handles the conversion of a resource pack or Minecraft mod resource set. */
 public final class PackConverter {
     private Path input;
     private Path output;
     private String packName;
-
     private Path vanillaPackPath = Paths.get("vanilla-pack.zip");
-
     private String textureSubdirectory;
-
     private boolean compressed;
     private boolean enforcePackCheck = false;
-
     private BiConsumer<ResourcePack, BedrockResourcePack> postProcessor;
-
     private final List<ConverterPipeline<?, ?>> converters = new ArrayList<>();
-
     private Path tmpDir;
     private Path modInputDir;
-
     private PackageHandler packageHandler = PackageHandler.ZIP;
     private LogListener logListener = new DefaultLogListener();
 
     @Nullable
-    public String textureSubdirectory() {
-        return this.textureSubdirectory;
-    }
-
-    public PackConverter input(@NotNull Path input) {
-        return this.input(input, true);
-    }
-
+    public String textureSubdirectory() { return this.textureSubdirectory; }
+    public PackConverter input(@NotNull Path input) { return this.input(input, true); }
     public PackConverter input(@NotNull Path input, boolean compressed) {
         this.input = input;
         this.compressed = compressed;
         return this;
     }
-
-    public PackConverter output(@NotNull Path output) {
-        this.output = output;
-        return this;
-    }
-
-    public PackConverter packName(@NotNull String packName) {
-        this.packName = packName;
-        return this;
-    }
-
+    public PackConverter output(@NotNull Path output) { this.output = output; return this; }
+    public PackConverter packName(@NotNull String packName) { this.packName = packName; return this; }
     public @NotNull String packName() {
         if (packName == null || packName.isBlank()) return input.getFileName().toString().replaceFirst("[.][^.]+$", "");
         return packName;
     }
-
-    public PackConverter vanillaPackPath(@NotNull Path vanillaPackPath) {
-        this.vanillaPackPath = vanillaPackPath;
-        return this;
-    }
-
-    public PackConverter textureSubdirectory(@NotNull String textureSubdirectory) {
-        this.textureSubdirectory = textureSubdirectory;
-        return this;
-    }
-
-    public PackConverter enforcePackCheck(boolean enforcePackCheck) {
-        this.enforcePackCheck = enforcePackCheck;
-        return this;
-    }
-
-    public PackConverter converter(@NotNull ConverterPipeline<?, ?> converter) {
-        this.converters.add(converter);
-        return this;
-    }
-
-    public PackConverter converters(@NotNull List<? extends ConverterPipeline<?, ?>> converters) {
-        this.converters.addAll(converters);
-        return this;
-    }
-
-    public PackConverter logListener(@NotNull LogListener logListener) {
-        this.logListener = logListener;
-        return this;
-    }
-
-    public PackConverter packageHandler(@NotNull PackageHandler packageHandler) {
-        this.packageHandler = packageHandler;
-        return this;
-    }
-
-    public PackConverter postProcessor(@NotNull BiConsumer<ResourcePack, BedrockResourcePack> postProcessor) {
-        this.postProcessor = postProcessor;
-        return this;
-    }
+    public PackConverter vanillaPackPath(@NotNull Path vanillaPackPath) { this.vanillaPackPath = vanillaPackPath; return this; }
+    public PackConverter textureSubdirectory(@NotNull String textureSubdirectory) { this.textureSubdirectory = textureSubdirectory; return this; }
+    public PackConverter enforcePackCheck(boolean enforcePackCheck) { this.enforcePackCheck = enforcePackCheck; return this; }
+    public PackConverter converter(@NotNull ConverterPipeline<?, ?> converter) { this.converters.add(converter); return this; }
+    public PackConverter converters(@NotNull List<? extends ConverterPipeline<?, ?>> converters) { this.converters.addAll(converters); return this; }
+    public PackConverter logListener(@NotNull LogListener logListener) { this.logListener = logListener; return this; }
+    public PackConverter packageHandler(@NotNull PackageHandler packageHandler) { this.packageHandler = packageHandler; return this; }
+    public PackConverter postProcessor(@NotNull BiConsumer<ResourcePack, BedrockResourcePack> postProcessor) { this.postProcessor = postProcessor; return this; }
 
     public PackConverter convert() throws IOException {
         if (this.input == null) throw new NullPointerException("Input cannot be null");
@@ -158,29 +102,40 @@ public final class PackConverter {
         Path source = this.input;
         boolean sourceCompressed = this.compressed;
         boolean modJar = ModJarExtractor.isModJar(this.input);
+        boolean modDirectory = false;
+
+        Path parent = this.output.toAbsolutePath().getParent();
+        if (parent == null) throw new IOException("Output must have a parent directory: " + this.output);
+        this.modInputDir = parent.resolve(this.output.getFileName() + "_mod_resources");
 
         if (modJar) {
-            Path parent = this.output.toAbsolutePath().getParent();
-            this.modInputDir = parent.resolve(this.output.getFileName() + "_mod_resources/");
             if (Files.exists(this.modInputDir)) PathUtils.delete(this.modInputDir);
             Files.createDirectories(this.modInputDir);
             ModJarExtractor.extract(this.input, this.modInputDir);
             source = this.modInputDir;
             sourceCompressed = false;
             this.logListener.info("Detected mod JAR; extracting client resources from assets/...");
+        } else if (!this.compressed && ModJarExtractor.isModDirectory(this.input)) {
+            if (Files.exists(this.modInputDir)) PathUtils.delete(this.modInputDir);
+            Files.createDirectories(this.modInputDir);
+            List<Path> jars = ModJarExtractor.extractAll(this.input, this.modInputDir);
+            source = this.modInputDir;
+            sourceCompressed = false;
+            modDirectory = true;
+            this.logListener.info("Detected mod directory; merged " + jars.size() + " mod JAR resource(s) in deterministic overlay order.");
         }
 
         final Path effectiveSource = source;
         final boolean effectiveCompressed = sourceCompressed;
+        final boolean effectiveModInput = modJar || modDirectory;
 
         ZipUtils.openFileSystem(effectiveSource, effectiveCompressed, input -> {
-            if (this.enforcePackCheck && !modJar && !Files.exists(input.resolve("pack.mcmeta"))) {
+            if (this.enforcePackCheck && !effectiveModInput && !Files.exists(input.resolve("pack.mcmeta"))) {
                 logListener.error("Invalid Java Edition resource pack. No pack.mcmeta found.");
                 return;
             }
 
-            this.tmpDir = this.output.toAbsolutePath().getParent().resolve(this.output.getFileName() + "_mcpack/");
-
+            this.tmpDir = parent.resolve(this.output.getFileName() + "_mcpack");
             ResourcePack javaResourcePack = effectiveCompressed
                     ? MinecraftResourcePackReader.minecraft().readFromZipFile(effectiveSource)
                     : MinecraftResourcePackReader.minecraft().read(NioDirectoryFileTreeReader.read(effectiveSource));
@@ -192,38 +147,30 @@ public final class PackConverter {
                             bedrockResourcePack, packName(), textureSubdirectory, logListener))
                     .sum();
 
-            // Animated Java textures are not represented by creative-api's Texture
-            // objects. Process their .png.mcmeta sidecars after normal textures have
-            // been emitted, converting timing/order into a Bedrock flipbook sheet.
             try {
-                AnimatedTextureConverter.convert(input, this.tmpDir, bedrockResourcePack, logListener, textureSubdirectory);
+                int animated = AnimatedTextureConverter.convert(effectiveSource, this.tmpDir,
+                        bedrockResourcePack, logListener, textureSubdirectory);
+                if (animated > 0) logListener.info("Animated resource conversion added " + animated + " flipbook(s).");
             } catch (IOException exception) {
                 logListener.error("Failed to process animated textures.", exception);
                 errors++;
             }
 
-            if (this.postProcessor != null) {
-                this.postProcessor.accept(javaResourcePack, bedrockResourcePack);
-            }
-
+            if (this.postProcessor != null) this.postProcessor.accept(javaResourcePack, bedrockResourcePack);
             bedrockResourcePack.export();
 
-            if (errors > 0) {
-                this.logListener.warn("Pack conversion completed with " + errors + " errors!");
-            } else {
-                this.logListener.info("Pack conversion completed successfully!");
-            }
+            if (errors > 0) this.logListener.warn("Pack conversion completed with " + errors + " errors!");
+            else this.logListener.info("Pack conversion completed successfully!");
         });
-
         return this;
     }
 
     public PackConverter pack() throws IOException {
-        if (tmpDir == null || !Files.exists(this.tmpDir)) return this;
+        if (tmpDir == null || !Files.exists(tmpDir)) return this;
         this.logListener.info("Packaging pack...");
-        this.packageHandler.pack(this, this.tmpDir, this.output, this.logListener);
+        this.packageHandler.pack(this, tmpDir, output, logListener);
         this.logListener.info("Packaged pack! Cleaning up...");
-        this.cleanup();
+        cleanup();
         this.logListener.info("Pack converted.");
         return this;
     }
