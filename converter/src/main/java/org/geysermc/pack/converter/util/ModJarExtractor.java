@@ -24,19 +24,26 @@ package org.geysermc.pack.converter.util;
 
 import org.jetbrains.annotations.NotNull;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 /** Extracts resource-pack assets from Minecraft mod JARs. */
 public final class ModJarExtractor {
     private static final String ASSETS_PREFIX = "assets/";
+    private static final String NESTED_JAR_PREFIX = "META-INF/jars/";
+    private static final int MAX_NESTED_JAR_DEPTH = 8;
+    private static final long MAX_NESTED_JAR_SIZE = 64L * 1024L * 1024L;
 
     private ModJarExtractor() {
     }
@@ -58,22 +65,9 @@ public final class ModJarExtractor {
     public static @NotNull Path extract(@NotNull Path jar, @NotNull Path destination) throws IOException {
         Path root = destination.toAbsolutePath().normalize();
         Files.createDirectories(root);
-
-        try (InputStream input = Files.newInputStream(jar); ZipInputStream zip = new ZipInputStream(input)) {
-            ZipEntry entry;
-            while ((entry = zip.getNextEntry()) != null) {
-                String name = entry.getName().replace('\\', '/');
-                if (entry.isDirectory() || !isResourcePackEntry(name)) continue;
-
-                Path target = root.resolve(name).normalize();
-                if (!target.startsWith(root)) {
-                    throw new IOException("Unsafe mod JAR entry: " + name);
-                }
-
-                Path parent = target.getParent();
-                if (parent != null) Files.createDirectories(parent);
-                Files.copy(zip, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            }
+        Set<String> visitedNestedJars = new HashSet<>();
+        try (InputStream input = Files.newInputStream(jar)) {
+            extractJar(input, root, 0, visitedNestedJars);
         }
         return root;
     }
@@ -90,7 +84,8 @@ public final class ModJarExtractor {
         try (var files = Files.list(root)) {
             jars = files.filter(Files::isRegularFile)
                     .filter(ModJarExtractor::isModJar)
-                    .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT)))
+                    .sorted(Comparator.comparing((Path path) -> path.getFileName().toString().toLowerCase(Locale.ROOT))
+                            .thenComparing(path -> path.getFileName().toString()))
                     .toList();
         }
         if (jars.isEmpty()) throw new IOException("No mod JARs found in: " + directory);
@@ -98,6 +93,46 @@ public final class ModJarExtractor {
         Files.createDirectories(destination);
         for (Path jar : jars) extract(jar, destination);
         return List.copyOf(jars);
+    }
+
+    private static void extractJar(InputStream input, Path root, int depth, Set<String> visitedNestedJars) throws IOException {
+        try (ZipInputStream zip = new ZipInputStream(input)) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                String name = entry.getName().replace('\\', '/');
+                if (entry.isDirectory()) continue;
+
+                if (isResourcePackEntry(name)) {
+                    copyEntry(zip, root, name);
+                    continue;
+                }
+
+                if (depth < MAX_NESTED_JAR_DEPTH && isNestedJarEntry(name)) {
+                    byte[] nested = zip.readNBytes((int) Math.min(MAX_NESTED_JAR_SIZE, Integer.MAX_VALUE));
+                    if (nested.length == MAX_NESTED_JAR_SIZE && zip.read() != -1) {
+                        throw new IOException("Nested mod JAR exceeds " + MAX_NESTED_JAR_SIZE + " bytes: " + name);
+                    }
+                    String key = name + ':' + Integer.toUnsignedString(java.util.Arrays.hashCode(nested));
+                    if (visitedNestedJars.add(key)) {
+                        extractJar(new ByteArrayInputStream(nested), root, depth + 1, visitedNestedJars);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void copyEntry(ZipInputStream zip, Path root, String name) throws IOException {
+        Path target = root.resolve(name).normalize();
+        if (!target.startsWith(root)) {
+            throw new IOException("Unsafe mod JAR entry: " + name);
+        }
+        Path parent = target.getParent();
+        if (parent != null) Files.createDirectories(parent);
+        Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static boolean isNestedJarEntry(String name) {
+        return name.startsWith(NESTED_JAR_PREFIX) && name.endsWith(".jar");
     }
 
     private static boolean isResourcePackEntry(String name) {
