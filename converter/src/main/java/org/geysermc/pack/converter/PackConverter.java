@@ -141,13 +141,11 @@ public final class PackConverter {
                 ConversionCache cache = new ConversionCache(cacheDir);
                 boolean outputExists = Files.exists(output) && Files.size(output) > 0;
                 Optional<String> cached = useConversionCache ? cache.read() : Optional.empty();
-                if (outputExists && cached.isPresent() && cached.get().equals(context.substring(0, 64))) {
-                    logListener.info("Conversion cache hit; input and vanilla resources are unchanged.");
+                if (outputExists && cached.isPresent() && cached.get().equals(inputFingerprint)) {
+                    logListener.info("Conversion cache hit; input resources are unchanged.");
                     return;
                 }
                 logListener.info(cached.isPresent() ? "Conversion cache miss; source context changed." : "Conversion cache miss; no valid cache entry.");
-                // Store a context fingerprint only after a successful export below.
-                diagnostics.info("cache", "Conversion cache enabled.");
 
                 ResourceInventory inventory = ResourceInventory.scan(effectiveSource);
                 for (ResourceInventory.Resource resource : inventory.resources()) {
