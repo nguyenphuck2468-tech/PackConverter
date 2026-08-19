@@ -56,8 +56,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.ServiceLoader;
 import java.util.stream.StreamSupport;
 
@@ -144,7 +146,7 @@ public class TextureConverter implements AssetExtractor<Texture>, AssetConverter
     @Override
     public void include(BedrockResourcePack pack, List<TransformedTexture> transformedTextures, CombineContext context) {
         Path texturePath = pack.directory().resolve(BEDROCK_TEXTURES_LOCATION);
-        List<String> exportedPaths = new ArrayList<>();
+        Set<String> exportedPaths = new HashSet<>();
 
         for (TransformedTexture textureToExport : transformedTextures) {
             String bedrockDirectory = "%s/%s";
@@ -154,11 +156,10 @@ public class TextureConverter implements AssetExtractor<Texture>, AssetConverter
 
             List<Path> outputs = new ArrayList<>();
             for (String outputPath : textureToExport.output()) {
-                if (exportedPaths.contains(outputPath)) {
+                if (!exportedPaths.add(outputPath)) {
                     context.warn("Conflicting texture " + outputPath + "!");
                     continue;
                 }
-                exportedPaths.add(outputPath);
 
                 int slashIndex = outputPath.indexOf('/');
                 String root = slashIndex != -1 ? outputPath.substring(0, slashIndex) : "";
