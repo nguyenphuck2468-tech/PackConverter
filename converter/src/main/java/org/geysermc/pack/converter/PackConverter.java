@@ -29,6 +29,7 @@ package org.geysermc.pack.converter;
 import org.apache.commons.io.file.PathUtils;
 import org.geysermc.pack.bedrock.resource.BedrockResourcePack;
 import org.geysermc.pack.converter.pipeline.ConverterPipeline;
+import org.geysermc.pack.converter.util.AnimatedTextureConverter;
 import org.geysermc.pack.converter.util.DefaultLogListener;
 import org.geysermc.pack.converter.util.LogListener;
 import org.geysermc.pack.converter.util.ModJarExtractor;
@@ -75,207 +76,83 @@ public final class PackConverter {
     private PackageHandler packageHandler = PackageHandler.ZIP;
     private LogListener logListener = new DefaultLogListener();
 
-    /**
-     * Gets the subdirectory used for textures in the converted
-     * resource pack.
-     * <p>
-     * This option is only necessary for non-vanilla resource packs.
-     *
-     * @return the texture subdirectory
-     */
     @Nullable
     public String textureSubdirectory() {
         return this.textureSubdirectory;
     }
 
-    /**
-     * Sets the input (Java Edition) pack location.
-     *
-     * <p>A normal resource-pack ZIP, directory, or Minecraft mod JAR may be
-     * supplied. For a mod JAR, PackConverter automatically extracts its
-     * resource-pack assets before conversion.</p>
-     *
-     * @param input the input pack location
-     * @return this instance
-     */
     public PackConverter input(@NotNull Path input) {
         return this.input(input, true);
     }
 
-    /**
-     * Sets the input (Java Edition) pack location.
-     * <p>
-     * Set {@code compressed} to {@code true} if the input pack is
-     * compressed, {@code false} otherwise. Mod JARs are detected by their
-     * extension and extracted regardless of this flag.
-     *
-     * @param input the input pack location
-     * @param compressed whether the input pack is compressed
-     * @return this instance
-     */
     public PackConverter input(@NotNull Path input, boolean compressed) {
         this.input = input;
         this.compressed = compressed;
         return this;
     }
 
-    /**
-     * Sets the output (Bedrock Edition) pack location.
-     *
-     * @param output the output pack location
-     * @return this instance
-     */
     public PackConverter output(@NotNull Path output) {
         this.output = output;
         return this;
     }
 
-    /**
-     * Sets the output (Bedrock Edition) pack name.
-     *
-     * @param packName the output pack name
-     * @return this instance
-     */
     public PackConverter packName(@NotNull String packName) {
         this.packName = packName;
         return this;
     }
 
-    /**
-     * Gets the output (Bedrock Edition) pack name.
-     *
-     * @return the pack name
-     */
     public @NotNull String packName() {
         if (packName == null || packName.isBlank()) return input.getFileName().toString().replaceFirst("[.][^.]+$", "");
-
         return packName;
     }
 
-    /**
-     * Sets the path where the vanilla pack is downloaded to
-     *
-     * @param vanillaPackPath the vanilla pack location
-     * @return this instance
-     */
     public PackConverter vanillaPackPath(@NotNull Path vanillaPackPath) {
         this.vanillaPackPath = vanillaPackPath;
         return this;
     }
 
-    /**
-     * Sets the texture subdirectory.
-     * <p>
-     * This option is only necessary for non-vanilla resource packs.
-     *
-     * @param textureSubdirectory the texture subdirectory
-     * @return this instance
-     */
     public PackConverter textureSubdirectory(@NotNull String textureSubdirectory) {
         this.textureSubdirectory = textureSubdirectory;
         return this;
     }
 
-    /**
-     * Sets if PackConverter should enforce a check for `pack.mcmeta` in the input.
-     *
-     * @param enforcePackCheck whether the check should be done
-     * @return this instance
-     */
     public PackConverter enforcePackCheck(boolean enforcePackCheck) {
         this.enforcePackCheck = enforcePackCheck;
         return this;
     }
 
-    /**
-     * Adds a converter to the converter list.
-     *
-     * @param converter the converter to add
-     * @return this instance
-     */
     public PackConverter converter(@NotNull ConverterPipeline<?, ?> converter) {
         this.converters.add(converter);
         return this;
     }
 
-    /**
-     * Adds a list of converters to the converter list.
-     *
-     * @param converters the converters to add
-     * @return this instance
-     */
     public PackConverter converters(@NotNull List<? extends ConverterPipeline<?, ?>> converters) {
         this.converters.addAll(converters);
         return this;
     }
 
-    /**
-     * Sets the log listener for displaying conversion information.
-     *
-     * @param logListener the log listener
-     * @return this instance
-     */
     public PackConverter logListener(@NotNull LogListener logListener) {
         this.logListener = logListener;
         return this;
     }
 
-    /**
-     * Sets the handler used to package the resource pack. By default,
-     * the resource pack is zipped, but this can be changed to a different
-     * handler through this method.
-     *
-     * @param packageHandler the package handler
-     * @return this instance
-     */
     public PackConverter packageHandler(@NotNull PackageHandler packageHandler) {
         this.packageHandler = packageHandler;
         return this;
     }
 
-    /**
-     * Sets the post processor for the converted resource pack.
-     * <p>
-     * This is called after the pack conversion is complete, but
-     * before the pack is packaged.
-     *
-     * @param postProcessor the post processor
-     * @return this instance
-     */
     public PackConverter postProcessor(@NotNull BiConsumer<ResourcePack, BedrockResourcePack> postProcessor) {
         this.postProcessor = postProcessor;
         return this;
     }
 
-    /**
-     * Convert all resources in the pack using the converters
-     *
-     * @return this instance
-     * @throws IOException if an I/O error occurs
-     */
     public PackConverter convert() throws IOException {
-        if (this.input == null) {
-            throw new NullPointerException("Input cannot be null");
-        }
+        if (this.input == null) throw new NullPointerException("Input cannot be null");
+        if (this.output == null) throw new NullPointerException("Output cannot be null");
+        if (this.vanillaPackPath == null) throw new NullPointerException("Vanilla Pack Path cannot be null");
+        if (this.converters.isEmpty()) throw new IllegalStateException("No converters have been added");
 
-        if (this.output == null) {
-            throw new NullPointerException("Output cannot be null");
-        }
-
-        if (this.vanillaPackPath == null) {
-            throw new NullPointerException("Vanilla Pack Path cannot be null");
-        }
-
-        if (this.converters.isEmpty()) {
-            throw new IllegalStateException("No converters have been added");
-        }
-
-        // Load any image plugins
         ImageIO.scanForPlugins();
-
-        // Need to download the client jar, then use the client jar to get the
-        // vanilla models and textures, so we can ensure all parent models exist
-        // to convert them to Bedrock.
         VanillaPackProvider.create(this.vanillaPackPath, this.logListener);
 
         Path source = this.input;
@@ -285,9 +162,7 @@ public final class PackConverter {
         if (modJar) {
             Path parent = this.output.toAbsolutePath().getParent();
             this.modInputDir = parent.resolve(this.output.getFileName() + "_mod_resources/");
-            if (Files.exists(this.modInputDir)) {
-                PathUtils.delete(this.modInputDir);
-            }
+            if (Files.exists(this.modInputDir)) PathUtils.delete(this.modInputDir);
             Files.createDirectories(this.modInputDir);
             ModJarExtractor.extract(this.input, this.modInputDir);
             source = this.modInputDir;
@@ -317,6 +192,16 @@ public final class PackConverter {
                             bedrockResourcePack, packName(), textureSubdirectory, logListener))
                     .sum();
 
+            // Animated Java textures are not represented by creative-api's Texture
+            // objects. Process their .png.mcmeta sidecars after normal textures have
+            // been emitted, converting timing/order into a Bedrock flipbook sheet.
+            try {
+                AnimatedTextureConverter.convert(input, this.tmpDir, bedrockResourcePack, logListener, textureSubdirectory);
+            } catch (IOException exception) {
+                logListener.error("Failed to process animated textures.", exception);
+                errors++;
+            }
+
             if (this.postProcessor != null) {
                 this.postProcessor.accept(javaResourcePack, bedrockResourcePack);
             }
@@ -333,40 +218,20 @@ public final class PackConverter {
         return this;
     }
 
-    /**
-     * Convert the temporary folder into the output zip
-     *
-     * @return this instance
-     * @throws IOException if an I/O error occurs
-     */
     public PackConverter pack() throws IOException {
         if (tmpDir == null || !Files.exists(this.tmpDir)) return this;
-
         this.logListener.info("Packaging pack...");
-
         this.packageHandler.pack(this, this.tmpDir, this.output, this.logListener);
         this.logListener.info("Packaged pack! Cleaning up...");
-
         this.cleanup();
-
         this.logListener.info("Pack converted.");
-
         return this;
     }
 
-    /**
-     * Remove the temporary folders generated by the converter.
-     * <p>
-     * Silently fails.
-     */
     private void cleanup() {
         try {
-            if (tmpDir != null) {
-                PathUtils.delete(tmpDir);
-            }
-            if (modInputDir != null) {
-                PathUtils.delete(modInputDir);
-            }
+            if (tmpDir != null) PathUtils.delete(tmpDir);
+            if (modInputDir != null) PathUtils.delete(modInputDir);
         } catch (IOException ignored) {
         }
     }
