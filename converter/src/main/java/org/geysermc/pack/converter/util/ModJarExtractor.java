@@ -147,10 +147,20 @@ public final class ModJarExtractor {
                     collisions.add(name + " (" + previous + " -> " + jar.getFileName() + ")");
                 }
 
-                long before = bytesExtracted[0];
-                try {
-                    long copied = Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING);
-                    if (copied > MAX_ENTRY_SIZE || before + copied > MAX_TOTAL_SIZE) {
+                long remainingEntry = MAX_ENTRY_SIZE;
+                long remainingTotal = MAX_TOTAL_SIZE - bytesExtracted[0];
+                if (remainingTotal <= 0) {
+                    throw new IOException("Mod resource total size limit exceeded (" + MAX_TOTAL_SIZE + " bytes)");
+                }
+                long maxBytes = Math.min(remainingEntry, remainingTotal);
+                try (InputStream bounded = new SizeLimitedInputStream(zip, maxBytes)) {
+                    long copied = Files.copy(bounded, target, StandardCopyOption.REPLACE_EXISTING);
+                    if (bounded instanceof SizeLimitedInputStream limited && limited.limitReached()) {
+                        Files.deleteIfExists(target);
+                        throw new IOException("Mod resource entry exceeds the " + MAX_ENTRY_SIZE
+                                + " byte limit: " + entry.getName());
+                    }
+                    if (copied > maxBytes) {
                         Files.deleteIfExists(target);
                         throw new IOException("Mod resource size limit exceeded while extracting: " + entry.getName());
                     }
@@ -200,5 +210,43 @@ public final class ModJarExtractor {
         return name.equals("pack.mcmeta")
                 || name.equals("pack.png")
                 || name.startsWith(ASSETS_PREFIX);
+    }
+
+    private static final class SizeLimitedInputStream extends InputStream {
+        private final InputStream delegate;
+        private long remaining;
+        private boolean limitReached;
+
+        private SizeLimitedInputStream(InputStream delegate, long limit) {
+            this.delegate = delegate;
+            this.remaining = limit;
+        }
+
+        @Override
+        public int read() throws IOException {
+            if (remaining == 0) {
+                limitReached = true;
+                return -1;
+            }
+            int value = delegate.read();
+            if (value >= 0) remaining--;
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            if (remaining == 0) {
+                limitReached = true;
+                return -1;
+            }
+            int allowed = (int) Math.min(length, remaining);
+            int read = delegate.read(buffer, offset, allowed);
+            if (read > 0) remaining -= read;
+            return read;
+        }
+
+        private boolean limitReached() {
+            return limitReached;
+        }
     }
 }
