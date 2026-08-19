@@ -60,6 +60,7 @@ public final class VanillaPackProvider {
 
     // Hydraulic 26.2 needs matching client models when stitching mod resources.
     private static final String VANILLA_VERSION = "26.2";
+    private static final String VERSION_MARKER = ".packconverter-vanilla-version";
 
     /**
      * Downloads the vanilla jar from Mojang's servers.
@@ -67,13 +68,13 @@ public final class VanillaPackProvider {
      * @param path The path to download the jar to.
      */
     public static void create(@NotNull Path path, @NotNull LogListener log) {
-        // Jar already exists; do nothing
-        if (Files.exists(path)) {
-            log.debug("Vanilla jar already exists, skipping download");
+        if (Files.exists(path) && hasExpectedVersion(path)) {
+            log.debug("Vanilla jar already matches {}, skipping download", VANILLA_VERSION);
             return;
         }
 
         try {
+            Files.deleteIfExists(path);
             // Download vanilla jar
             log.info("Fetching vanilla jar file download...");
             // Get the version manifest from Mojang
@@ -120,12 +121,34 @@ public final class VanillaPackProvider {
             if (path.getParent() != null) Files.createDirectories(path.getParent());
 
             PathUtils.copyFile(new URL(clientJarInfo.url), path);
-            // Clean the jar
+            // Clean the jar and write a marker so a cache produced for a
+            // different Minecraft version is never reused for model stitching.
             clean(path, log);
+            writeVersionMarker(path);
             log.info("Downloaded vanilla jar!");
         } catch (IOException e) {
             log.error("Error downloading vanilla jar", e);
         }
+    }
+
+    private static boolean hasExpectedVersion(@NotNull Path path) {
+        try {
+            final boolean[] matches = { false };
+            ZipUtils.openFileSystem(path, true, root -> {
+                Path marker = root.resolve(VERSION_MARKER);
+                matches[0] = Files.isRegularFile(marker)
+                        && VANILLA_VERSION.equals(Files.readString(marker).trim());
+            });
+            return matches[0];
+        } catch (IOException exception) {
+            return false;
+        }
+    }
+
+    private static void writeVersionMarker(@NotNull Path path) throws IOException {
+        ZipUtils.openFileSystem(path, true, root ->
+                Files.writeString(root.resolve(VERSION_MARKER), VANILLA_VERSION)
+        );
     }
 
     /**
