@@ -80,7 +80,7 @@ public final class VanillaPackProvider {
             // Get the url for the latest version of the games manifest
             String latestInfoURL = "";
             for (Version version : versionManifest.getVersions()) {
-                if (version.getId().equals("1.21.11")) { // TODO De-hardcode this
+                if (version.getId().equals("26.2")) { // TODO De-hardcode this
                     latestInfoURL = version.getUrl();
                     break;
                 }
