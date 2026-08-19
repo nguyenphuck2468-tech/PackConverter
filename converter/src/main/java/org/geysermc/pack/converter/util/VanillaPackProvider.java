@@ -69,7 +69,7 @@ public final class VanillaPackProvider {
      */
     public static void create(@NotNull Path path, @NotNull LogListener log) {
         if (Files.exists(path) && hasExpectedVersion(path)) {
-            log.debug("Vanilla jar already matches {}, skipping download", VANILLA_VERSION);
+            log.debug("Vanilla jar already matches " + VANILLA_VERSION + ", skipping download");
             return;
         }
 
