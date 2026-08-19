@@ -8,6 +8,9 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -34,8 +37,10 @@ import team.unnamed.creative.model.ModelTextures;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class ModelStitcher {
     private final Provider provider;
@@ -52,6 +57,7 @@ public class ModelStitcher {
     private Model.GuiLight guiLight;
     private final List<Element> elements = new ArrayList<>();
     private final List<ItemOverride> overrides = new ArrayList<>();
+    private final Set<Key> visitedParents = new HashSet<>();
 
     public ModelStitcher(@NotNull Provider provider, @NotNull Model baseModel) {
         this(provider, baseModel, new DefaultLogListener());
@@ -77,6 +83,7 @@ public class ModelStitcher {
 
         Key parentKey = baseModel.parent();
         if (parentKey != null) {
+            this.visitedParents.add(baseModel.key());
             Model parentModel = provider.model(parentKey);
             if (parentModel == null) {
                 log.error("Could not find parent model " + parentKey + " for model " + baseModel.key());
@@ -87,13 +94,24 @@ public class ModelStitcher {
     }
 
     private void inheritTraits(@NotNull Model model) {
-        List<Element> elements = model.elements();
-        if (elements != null && !elements.isEmpty()) {
-            this.elements.addAll(elements);
+        Key modelKey = model.key();
+        if (!this.visitedParents.add(modelKey)) {
+            log.warn("Detected circular model parent chain at " + modelKey + " for model " + baseModel.key());
+            return;
+        }
+
+        // Elements are inherited as a whole. A child model that defines its
+        // own elements replaces the parent's element list; only an element-less
+        // child reaches this method with an empty list and inherits geometry.
+        if (this.elements.isEmpty()) {
+            List<Element> elements = model.elements();
+            if (elements != null && !elements.isEmpty()) {
+                this.elements.addAll(elements);
+            }
         }
 
         List<ItemOverride> overrides = model.overrides();
-        if (overrides != null && !overrides.isEmpty()) {
+        if (overrides != null && !overrides.isEmpty() && this.overrides.isEmpty()) {
             this.overrides.addAll(overrides);
         }
 
@@ -109,9 +127,7 @@ public class ModelStitcher {
             List<ModelTexture> layers = textures.layers();
             if (layers != null) {
                 // Minecraft texture references are positional: layer0/layer1/etc.
-                // A child layer must win at the same slot; a parent only fills
-                // slots that the child did not define. Appending parent layers
-                // shifts the slots and causes modded models to use wrong textures.
+                // The child keeps its own slot; a parent only fills missing slots.
                 for (int i = 0; i < layers.size(); i++) {
                     ModelTexture texture = layers.get(i);
                     while (this.textureLayers.size() <= i) {
