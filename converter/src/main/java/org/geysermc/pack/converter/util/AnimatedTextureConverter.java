@@ -19,14 +19,11 @@ import org.jetbrains.annotations.NotNull;
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /** Converts Minecraft .png.mcmeta animations into Bedrock flipbook animations. */
 public final class AnimatedTextureConverter {
@@ -41,7 +38,12 @@ public final class AnimatedTextureConverter {
             for (Path meta : paths.filter(path -> path.toString().endsWith(".png.mcmeta")).toList()) {
                 String relativeMeta = sourceRoot.relativize(meta).toString().replace('\\', '/');
                 if (!relativeMeta.startsWith("assets/") || !relativeMeta.endsWith(".png.mcmeta")) continue;
-                String textureRelative = relativeMeta.substring("assets/".length(), relativeMeta.length() - ".mcmeta".length());
+                String withoutAssets = relativeMeta.substring("assets/".length(), relativeMeta.length() - ".mcmeta".length());
+                int namespaceSlash = withoutAssets.indexOf('/');
+                if (namespaceSlash <= 0) continue;
+                String resourcePath = withoutAssets.substring(namespaceSlash + 1);
+                if (!resourcePath.startsWith("textures/") || !resourcePath.endsWith(".png")) continue;
+                String textureRelative = resourcePath.substring("textures/".length());
                 Path texture = sourceRoot.resolve(relativeMeta.substring(0, relativeMeta.length() - ".mcmeta".length()));
                 if (!Files.isRegularFile(texture)) continue;
 
@@ -84,8 +86,7 @@ public final class AnimatedTextureConverter {
         // Minecraft per-frame durations into repeated frames so timing is kept.
         List<Integer> playback = new ArrayList<>();
         for (Frame frame : frames) {
-            int repeats = Math.max(1, frame.time());
-            for (int i = 0; i < repeats; i++) playback.add(frame.index());
+            for (int i = 0; i < Math.max(1, frame.time()); i++) playback.add(frame.index());
         }
 
         BufferedImage sheet = new BufferedImage(frameWidth, frameHeight * playback.size(), BufferedImage.TYPE_INT_ARGB);
@@ -102,14 +103,15 @@ public final class AnimatedTextureConverter {
         String relative = textureRelative.substring(0, textureRelative.length() - ".png".length());
         int slash = relative.indexOf('/');
         if (slash <= 0) return false;
-        String root = relative.substring(0, slash);
+        String rootPath = relative.substring(0, slash);
         String value = relative.substring(slash + 1);
-        String bedrockRoot = switch (root) {
+        String bedrockRoot = switch (rootPath) {
             case "block" -> "blocks";
             case "item" -> "items";
             case "gui" -> "ui";
-            default -> root;
+            default -> rootPath;
         };
+
         String mappedValue = value;
         for (String mapped : JsonMappings.getMapping("textures").map(relative)) {
             int mappedSlash = mapped.indexOf('/');
@@ -117,7 +119,9 @@ public final class AnimatedTextureConverter {
             break;
         }
 
-        String prefix = textureSubdirectory == null ? "textures/" + bedrockRoot + "/" : "textures/" + bedrockRoot + "/" + textureSubdirectory + "/";
+        String prefix = textureSubdirectory == null
+                ? "textures/" + bedrockRoot + "/"
+                : "textures/" + bedrockRoot + "/" + textureSubdirectory + "/";
         String outputName = prefix + mappedValue + ".png";
         Path output = outputRoot.resolve(outputName);
         Files.createDirectories(output.getParent());
