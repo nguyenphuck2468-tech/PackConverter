@@ -10,14 +10,6 @@
  *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
  */
 package org.geysermc.pack.converter;
 
@@ -31,6 +23,7 @@ import org.geysermc.pack.converter.util.DefaultLogListener;
 import org.geysermc.pack.converter.util.GeckoLibAnimationConverter;
 import org.geysermc.pack.converter.util.LogListener;
 import org.geysermc.pack.converter.util.ModelInheritanceResolver;
+import org.geysermc.pack.converter.util.ModelOverrideAnalyzer;
 import org.geysermc.pack.converter.util.ModJarExtractor;
 import org.geysermc.pack.converter.util.NioDirectoryFileTreeReader;
 import org.geysermc.pack.converter.util.ResourceInventory;
@@ -93,7 +86,6 @@ public final class PackConverter {
 
         ImageIO.scanForPlugins();
         VanillaPackProvider.create(vanillaPackPath, logListener);
-
         Path source = input;
         boolean sourceCompressed = compressed;
         boolean modJar = ModJarExtractor.isModJar(input);
@@ -151,10 +143,7 @@ public final class PackConverter {
                 long cycles = 0;
                 for (ResourceInventory.Resource resource : inventory.of(ResourceInventory.Kind.MODEL)) {
                     String path = resource.relativePath();
-                    String marker = "assets/";
-                    int start = path.indexOf(marker);
-                    if (start < 0) continue;
-                    String asset = path.substring(start + marker.length());
+                    String asset = path.substring(path.indexOf("assets/") + 7);
                     int slash = asset.indexOf('/');
                     if (slash < 1 || !asset.contains("/models/")) continue;
                     String namespace = asset.substring(0, slash);
@@ -163,21 +152,26 @@ public final class PackConverter {
                     if (resolution.inherited()) inherited++;
                     if (resolution.cycle()) {
                         cycles++;
-                        diagnostics.warning(path, "Model parent cycle detected; conversion kept the local model data.");
+                        diagnostics.warning(path, "Model parent cycle detected; kept local data as fallback.");
                     } else if (resolution.inherited()) {
-                        diagnostics.converted(path, "Resolved Java model parent inheritance before downstream conversion.");
+                        diagnostics.converted(path, "Resolved Java model parent inheritance.");
                     }
                 }
                 if (inherited > 0) logListener.info("Resolved parent inheritance for " + inherited + " model(s).");
-                if (cycles > 0) logListener.warn("Detected " + cycles + " model parent cycle(s); skipped recursive expansion.");
+                if (cycles > 0) logListener.warn("Detected " + cycles + " model parent cycle(s).");
+
+                ModelOverrideAnalyzer.Result overrides = ModelOverrideAnalyzer.scan(effectiveSource, diagnostics);
+                if (overrides.overrides() > 0) {
+                    logListener.info("Indexed " + overrides.overrides() + " model override(s) with " + overrides.predicates() + " predicate value(s).");
+                }
+                if (overrides.malformed() > 0) logListener.warn("Found " + overrides.malformed() + " malformed model override file(s).");
             } catch (IOException exception) {
-                diagnostics.warning("resource-index", exception.getMessage() == null ? "Resource analysis failed" : exception.getMessage());
+                diagnostics.warning("resource-analysis", exception.getMessage() == null ? "Resource analysis failed" : exception.getMessage());
                 logListener.error("Failed to analyze source resources.", exception);
             }
 
             int errors = converters.stream().mapToInt(converter -> converter.convert(javaResourcePack,
                     Optional.of(vanillaResourcePack), bedrockResourcePack, packName(), textureSubdirectory, logListener)).sum();
-
             try {
                 int animated = AnimatedTextureConverter.convert(effectiveSource, tmpDir, bedrockResourcePack, logListener, textureSubdirectory);
                 if (animated > 0) diagnostics.converted("assets/*/*.png.mcmeta", "Converted " + animated + " animated texture(s) to Bedrock flipbooks");
@@ -186,7 +180,6 @@ public final class PackConverter {
                 logListener.error("Failed to process animated textures.", exception);
                 errors++;
             }
-
             try {
                 int boneAnimations = GeckoLibAnimationConverter.convert(effectiveSource, tmpDir, logListener);
                 if (boneAnimations > 0) diagnostics.converted("animations/*.json", "Converted " + boneAnimations + " bone animation file(s)");
@@ -195,7 +188,6 @@ public final class PackConverter {
                 logListener.error("Failed to process GeckoLib animations.", exception);
                 errors++;
             }
-
             if (postProcessor != null) postProcessor.accept(javaResourcePack, bedrockResourcePack);
             bedrockResourcePack.export();
             try {
