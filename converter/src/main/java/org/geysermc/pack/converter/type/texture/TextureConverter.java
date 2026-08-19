@@ -26,6 +26,7 @@
 
 package org.geysermc.pack.converter.type.texture;
 
+import net.kyori.adventure.key.Key;
 import org.geysermc.pack.bedrock.resource.BedrockResourcePack;
 import org.geysermc.pack.converter.pipeline.AssetCombiner;
 import org.geysermc.pack.converter.pipeline.AssetConverter;
@@ -39,7 +40,6 @@ import org.geysermc.pack.converter.type.texture.transformer.TransformedTexture;
 import org.geysermc.pack.converter.util.ImageUtil;
 import org.geysermc.pack.converter.util.JsonMappings;
 import org.jetbrains.annotations.NotNull;
-import org.jetbrains.annotations.Nullable;
 import team.unnamed.creative.ResourcePack;
 import team.unnamed.creative.texture.Texture;
 
@@ -115,12 +115,25 @@ public class TextureConverter implements AssetExtractor<Texture>, AssetConverter
         int slashIndex = relativePath.indexOf('/');
         String rootPath = slashIndex != -1 ? relativePath.substring(0, slashIndex) : "";
         String bedrockRoot = DIRECTORY_LOCATIONS.getOrDefault(rootPath, rootPath);
+        String namespace = texture.key().namespace();
 
         List<String> mapping = mappings.map(relativePath);
         List<String> transformedOutputs = new ArrayList<>();
         for (String item : mapping) {
             int itemSlashIndex = item.indexOf('/');
-            transformedOutputs.add(bedrockRoot + (itemSlashIndex != -1 ? item.substring(itemSlashIndex) : "/" + item) + ".png");
+            String output = bedrockRoot
+                    + (itemSlashIndex != -1 ? item.substring(itemSlashIndex) : "/" + item)
+                    + ".png";
+
+            // Resource-pack namespaces are significant when several gameplay
+            // mods are merged into one Bedrock pack. Keep non-vanilla textures
+            // isolated so identical paths from two mods cannot overwrite one
+            // another.
+            if (!Key.MINECRAFT_NAMESPACE.equals(namespace)) {
+                output = namespace + "/" + output;
+            }
+
+            transformedOutputs.add(output);
         }
 
         transformed.output(transformedOutputs);
