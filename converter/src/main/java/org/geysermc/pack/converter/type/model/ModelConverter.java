@@ -172,7 +172,11 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
 
         modelEntity.geometry(List.of(geometry));
 
-        if (model.key().namespace().contains("entity")) {
+        // A model's namespace identifies the mod; it does not tell us that
+        // the model is an entity. Classifying by namespace breaks mods whose
+        // namespace happens to contain "entity". Minecraft entity models live
+        // below the entity/ model path, so use the model path instead.
+        if (value.startsWith("entity/")) {
             return new BedrockModel(BedrockModel.ModelType.ENTITY, fileName + ".json", modelEntity);
         } else {
             // Bedrock only has a concept of entity or block models
@@ -197,7 +201,7 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
                 }
                 case BLOCK -> {
                     if (blockModels.contains(model.fileName())) {
-                        context.warn("Conflicting entity model " + model.fileName() + "!");
+                        context.warn("Conflicting block model " + model.fileName() + "!");
                         continue;
                     }
                     blockModels.add(model.fileName());
