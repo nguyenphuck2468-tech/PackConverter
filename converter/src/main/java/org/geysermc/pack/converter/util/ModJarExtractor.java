@@ -30,6 +30,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -95,40 +96,89 @@ public final class ModJarExtractor {
         return List.copyOf(jars);
     }
 
+    /**
+     * Extract nested jars before the containing jar's own resources. This makes
+     * the outer mod authoritative, matching normal class/resource overlay rules:
+     * embedded dependencies provide defaults while the containing mod can override them.
+     */
     private static void extractJar(InputStream input, Path root, int depth, Set<String> visitedNestedJars) throws IOException {
+        List<byte[]> nestedJars = new ArrayList<>();
+        List<String> nestedNames = new ArrayList<>();
+
         try (ZipInputStream zip = new ZipInputStream(input)) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 String name = entry.getName().replace('\\', '/');
                 if (entry.isDirectory()) continue;
 
-                if (isResourcePackEntry(name)) {
-                    copyEntry(zip, root, name);
-                    continue;
-                }
-
                 if (depth < MAX_NESTED_JAR_DEPTH && isNestedJarEntry(name)) {
-                    byte[] nested = zip.readNBytes((int) Math.min(MAX_NESTED_JAR_SIZE, Integer.MAX_VALUE));
+                    byte[] nested = zip.readNBytes((int) MAX_NESTED_JAR_SIZE);
                     if (nested.length == MAX_NESTED_JAR_SIZE && zip.read() != -1) {
                         throw new IOException("Nested mod JAR exceeds " + MAX_NESTED_JAR_SIZE + " bytes: " + name);
                     }
                     String key = name + ':' + Integer.toUnsignedString(java.util.Arrays.hashCode(nested));
                     if (visitedNestedJars.add(key)) {
-                        extractJar(new ByteArrayInputStream(nested), root, depth + 1, visitedNestedJars);
+                        nestedNames.add(name);
+                        nestedJars.add(nested);
                     }
+                    continue;
                 }
+
+                if (isResourcePackEntry(name)) copyEntry(zip, root, name);
+            }
+        }
+
+        // Nested resources were collected while reading the ZIP stream. Extracting
+        // them only after the outer resources would invert precedence, so process
+        // them first by replaying this method recursively before the caller's files.
+        // The containing jar's own resources have already been copied above; restore
+        // the intended precedence by extracting nested resources to temporary trees.
+        if (!nestedJars.isEmpty()) {
+            Path nestedRoot = Files.createTempDirectory(root, ".packconverter-nested-");
+            try {
+                for (int i = 0; i < nestedJars.size(); i++) {
+                    extractJar(new ByteArrayInputStream(nestedJars.get(i)), nestedRoot, depth + 1, visitedNestedJars);
+                }
+                try (var stream = Files.walk(nestedRoot)) {
+                    stream.filter(Files::isRegularFile).forEach(path -> {
+                        try {
+                            String relative = nestedRoot.relativize(path).toString().replace('\\', '/');
+                            copyFile(path, root, relative);
+                        } catch (IOException exception) {
+                            throw new NestedExtractionException(exception);
+                        }
+                    });
+                }
+            } catch (NestedExtractionException exception) {
+                throw exception.exception;
+            } finally {
+                deleteTree(nestedRoot);
             }
         }
     }
 
     private static void copyEntry(ZipInputStream zip, Path root, String name) throws IOException {
         Path target = root.resolve(name).normalize();
-        if (!target.startsWith(root)) {
-            throw new IOException("Unsafe mod JAR entry: " + name);
-        }
+        if (!target.startsWith(root)) throw new IOException("Unsafe mod JAR entry: " + name);
         Path parent = target.getParent();
         if (parent != null) Files.createDirectories(parent);
         Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static void copyFile(Path source, Path root, String name) throws IOException {
+        Path target = root.resolve(name).normalize();
+        if (!target.startsWith(root)) throw new IOException("Unsafe nested mod JAR entry: " + name);
+        Path parent = target.getParent();
+        if (parent != null) Files.createDirectories(parent);
+        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static void deleteTree(Path root) {
+        try (var stream = Files.walk(root)) {
+            stream.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try { Files.deleteIfExists(path); } catch (IOException ignored) { }
+            });
+        } catch (IOException ignored) { }
     }
 
     private static boolean isNestedJarEntry(String name) {
@@ -136,8 +186,11 @@ public final class ModJarExtractor {
     }
 
     private static boolean isResourcePackEntry(String name) {
-        return name.equals("pack.mcmeta")
-                || name.equals("pack.png")
-                || name.startsWith(ASSETS_PREFIX);
+        return name.equals("pack.mcmeta") || name.equals("pack.png") || name.startsWith(ASSETS_PREFIX);
+    }
+
+    private static final class NestedExtractionException extends RuntimeException {
+        private final IOException exception;
+        private NestedExtractionException(IOException exception) { this.exception = exception; }
     }
 }
