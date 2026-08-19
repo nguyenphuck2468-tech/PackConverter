@@ -27,6 +27,7 @@ import org.jetbrains.annotations.NotNull;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -44,12 +45,17 @@ import java.util.zip.ZipInputStream;
 public final class ModJarExtractor {
     private static final String ASSETS_PREFIX = "assets/";
 
+    // Keep malformed or hostile mod archives from consuming unbounded disk space.
+    private static final long MAX_ENTRY_SIZE = 128L * 1024 * 1024;
+    private static final long MAX_TOTAL_SIZE = 512L * 1024 * 1024;
+    private static final int MAX_RESOURCE_ENTRIES = 100_000;
+
     private ModJarExtractor() {
     }
 
     /** Immutable result of a deterministic multi-mod extraction. */
     public record ExtractionReport(@NotNull List<Path> mods, int filesExtracted,
-                                   @NotNull List<String> collisions) {
+                                   long bytesExtracted, @NotNull List<String> collisions) {
         public ExtractionReport {
             mods = List.copyOf(mods);
             collisions = List.copyOf(collisions);
@@ -72,7 +78,8 @@ public final class ModJarExtractor {
 
     /** Extracts one mod JAR into a resource-pack directory. */
     public static @NotNull Path extract(@NotNull Path jar, @NotNull Path destination) throws IOException {
-        extractInternal(jar, destination, new LinkedHashSet<>(), new LinkedHashSet<>(), new LinkedHashMap<>());
+        extractInternal(jar, destination, new LinkedHashSet<>(), new LinkedHashSet<>(), new LinkedHashMap<>(),
+                new long[]{0}, new int[]{0});
         return destination.toAbsolutePath().normalize();
     }
 
@@ -100,15 +107,19 @@ public final class ModJarExtractor {
         Set<String> extracted = new LinkedHashSet<>();
         Set<String> collisions = new LinkedHashSet<>();
         Map<String, Path> owners = new LinkedHashMap<>();
+        long[] bytesExtracted = {0};
+        int[] entriesExtracted = {0};
         int filesExtracted = 0;
         for (Path jar : jars) {
-            filesExtracted += extractInternal(jar, destination, extracted, collisions, owners);
+            filesExtracted += extractInternal(jar, destination, extracted, collisions, owners,
+                    bytesExtracted, entriesExtracted);
         }
-        return new ExtractionReport(jars, filesExtracted, new ArrayList<>(collisions));
+        return new ExtractionReport(jars, filesExtracted, bytesExtracted[0], new ArrayList<>(collisions));
     }
 
     private static int extractInternal(Path jar, Path destination, Set<String> extracted,
-                                       Set<String> collisions, Map<String, Path> owners) throws IOException {
+                                       Set<String> collisions, Map<String, Path> owners,
+                                       long[] bytesExtracted, int[] entriesExtracted) throws IOException {
         Path root = destination.toAbsolutePath().normalize();
         Files.createDirectories(root);
         int count = 0;
@@ -119,13 +130,17 @@ public final class ModJarExtractor {
                 String name = normalizeEntryName(entry.getName());
                 if (entry.isDirectory() || !isResourcePackEntry(name)) continue;
 
+                if (++entriesExtracted[0] > MAX_RESOURCE_ENTRIES) {
+                    throw new IOException("Mod resource entry limit exceeded (" + MAX_RESOURCE_ENTRIES + ")");
+                }
+
                 Path target = root.resolve(name).normalize();
                 if (!target.startsWith(root)) {
                     throw new IOException("Unsafe mod JAR entry: " + entry.getName());
                 }
 
                 Path parent = target.getParent();
-                if (parent != null) Files.createDirectories(parent);
+                if (parent != null) ensureSafeParent(root, parent);
 
                 Path previousOwner = owners.put(name, jar);
                 if (!extracted.add(name)) {
@@ -133,11 +148,34 @@ public final class ModJarExtractor {
                     collisions.add(name + " (" + previous + " -> " + jar.getFileName() + ")");
                 }
 
-                Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING);
+                long before = bytesExtracted[0];
+                try {
+                    long copied = Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING);
+                    if (copied > MAX_ENTRY_SIZE || before + copied > MAX_TOTAL_SIZE) {
+                        Files.deleteIfExists(target);
+                        throw new IOException("Mod resource size limit exceeded while extracting: " + entry.getName());
+                    }
+                    bytesExtracted[0] += copied;
+                } catch (IOException exception) {
+                    Files.deleteIfExists(target);
+                    throw exception;
+                }
                 count++;
             }
         }
         return count;
+    }
+
+    private static void ensureSafeParent(Path root, Path parent) throws IOException {
+        Path relative = root.relativize(parent);
+        Path current = root;
+        for (Path component : relative) {
+            current = current.resolve(component);
+            if (Files.isSymbolicLink(current)) {
+                throw new IOException("Refusing to extract through symbolic link: " + current);
+            }
+        }
+        Files.createDirectories(parent);
     }
 
     private static String normalizeEntryName(String name) throws IOException {
@@ -150,6 +188,11 @@ public final class ModJarExtractor {
         }
         if (normalized.startsWith("/") || normalized.matches("^[A-Za-z]:/.*")) {
             throw new IOException("Unsafe absolute mod JAR entry: " + name);
+        }
+        for (String component : normalized.split("/")) {
+            if (component.equals("..")) {
+                throw new IOException("Unsafe parent traversal in mod JAR entry: " + name);
+            }
         }
         return normalized;
     }
