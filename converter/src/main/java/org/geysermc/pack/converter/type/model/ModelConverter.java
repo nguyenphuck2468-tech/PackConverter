@@ -45,6 +45,7 @@ import org.geysermc.pack.converter.pipeline.AssetConverter;
 import org.geysermc.pack.converter.pipeline.AssetExtractor;
 import org.geysermc.pack.converter.pipeline.CombineContext;
 import org.geysermc.pack.converter.pipeline.ConversionContext;
+import org.geysermc.pack.converter.pipeline.AssetExtractor;
 import org.geysermc.pack.converter.pipeline.ExtractionContext;
 import team.unnamed.creative.ResourcePack;
 import team.unnamed.creative.base.CubeFace;
@@ -64,7 +65,6 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
 
     private static final String FORMAT_VERSION = "1.16.0";
     private static final String GEOMETRY_FORMAT = "geometry.%s";
-
     private static final float[] ELEMENT_OFFSET = new float[] { 8, 0, 8 };
 
     @Override
@@ -72,7 +72,6 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
         ModelStitcher.Provider modelProvider = context.vanillaPack()
                 .map(vanilla -> ModelStitcher.vanillaProvider(pack, vanilla))
                 .orElseGet(() -> ModelStitcher.baseProvider(pack));
-        // TODO maybe parallel, if model stitching takes a lot of time
         return pack.models().stream()
                 .map(model -> new ModelStitcher(modelProvider, model, context.logListener()).stitch())
                 .toList();
@@ -88,23 +87,24 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
 
         String value = model.key().value();
         context.debug("Converting model " + model.key().key() + ":" + value);
-
-        // TODO: Convert item models but save differently?
         if (value.startsWith("item/") && !convertItemModels) {
             return null;
         }
 
         ModelEntity modelEntity = new ModelEntity();
         modelEntity.formatVersion(FORMAT_VERSION);
-
         Geometry geometry = new Geometry();
 
         String namespace = model.key().namespace();
-        String fileName = value.substring(value.lastIndexOf('/') + 1);
+        // Keep namespace and relative model path in the generated filename.
+        // Bedrock resource packs combine many Java mods, so using only the
+        // basename (e.g. machine.json) causes unrelated mods to overwrite
+        // each other's models.
+        String relativePath = value;
+        String safePath = relativePath.replace('/', '_');
+        String fileName = namespace + "__" + safePath;
+        String geoName = (namespace.equals(Key.MINECRAFT_NAMESPACE) ? "minecraft." : namespace + ".") + safePath;
 
-        String geoName = (namespace.equals(Key.MINECRAFT_NAMESPACE) ? "" : namespace + ".") + fileName;
-
-        // TODO: Don't hardcode all this
         Description description = new Description();
         description.identifier(String.format(GEOMETRY_FORMAT, geoName));
         description.textureWidth(16);
@@ -115,18 +115,13 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
         geometry.description(description);
 
         List<Bones> bones = new ArrayList<>();
-
-        // TODO: Should each element be its own bone rather
-        //       than its own cube in the same bone?
         int i = 0;
         for (Element element : elements) {
             float[] from = element.from().toArray();
             float[] to = element.to().toArray();
-
             Bones bone = new Bones();
             bone.name("bone_" + i++);
             bone.pivot(new float[] { ELEMENT_OFFSET[0], ELEMENT_OFFSET[1], -ELEMENT_OFFSET[2] });
-
             Cubes cube = new Cubes();
             cube.origin(new float[] { ELEMENT_OFFSET[0] - to[0], from[1], from[2] - ELEMENT_OFFSET[2] });
             cube.size(new float[] { to[0] - from[0], to[1] - from[1], to[2] - from[2] });
@@ -135,7 +130,6 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
             if (elementRotation != null) {
                 float[] origin = elementRotation.origin().toArray();
                 cube.pivot(new float[] { ELEMENT_OFFSET[0] - origin[0], ELEMENT_OFFSET[1] - origin[1], origin[2] - ELEMENT_OFFSET[2] });
-
                 float angle = elementRotation.angle();
                 float[] rotation = new float[3];
                 switch (elementRotation.axis()) {
@@ -143,7 +137,6 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
                     case Y -> rotation[1] = -angle;
                     case Z -> rotation[2] = -angle;
                 }
-
                 cube.rotation(rotation);
             }
 
@@ -151,44 +144,28 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
             for (Map.Entry<CubeFace, ElementFace> entry : element.faces().entrySet()) {
                 CubeFace face = entry.getKey();
                 ElementFace elementFace = entry.getValue();
-                if (elementFace.uv() == null) {
-                    continue;
-                }
-
-                // The Java pack lib we use does this weird thing where it
-                // divides the UV by 16, so we need to multiply it by 16
-
+                if (elementFace.uv() == null) continue;
                 String texture = elementFace.texture().replace("#", "");
                 applyUv(uv, face, texture, multiplyUv(elementFace.uv(), 16f));
             }
-
             cube.uv(uv);
             bone.cubes(List.of(cube));
-
             bones.add(bone);
         }
 
         geometry.bones(bones);
-
         modelEntity.geometry(List.of(geometry));
 
-        // A model's namespace identifies the mod; it does not tell us that
-        // the model is an entity. Classifying by namespace breaks mods whose
-        // namespace happens to contain "entity". Minecraft entity models live
-        // below the entity/ model path, so use the model path instead.
         if (value.startsWith("entity/")) {
             return new BedrockModel(BedrockModel.ModelType.ENTITY, fileName + ".json", modelEntity);
-        } else {
-            // Bedrock only has a concept of entity or block models
-            return new BedrockModel(BedrockModel.ModelType.BLOCK, fileName + ".json", modelEntity);
         }
+        return new BedrockModel(BedrockModel.ModelType.BLOCK, fileName + ".json", modelEntity);
     }
 
     @Override
     public void include(BedrockResourcePack pack, List<BedrockModel> bedrockModels, CombineContext context) {
         List<String> entityModels = new ArrayList<>();
         List<String> blockModels = new ArrayList<>();
-
         for (BedrockModel model : bedrockModels) {
             switch (model.type()) {
                 case ENTITY -> {
@@ -218,8 +195,6 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
     private static void applyUv(Uv uv, CubeFace face, String texture, TextureUV faceUv) {
         float[] uvs;
         float[] uvSize;
-
-        // These values are flipped for some reason
         if (face == CubeFace.DOWN || face == CubeFace.UP) {
             uvs = new float[] { faceUv.to().x(), faceUv.to().y() };
             uvSize = new float[] { faceUv.from().x() - faceUv.to().x(), faceUv.from().y() - faceUv.to().y() };
@@ -227,56 +202,13 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
             uvs = new float[] { faceUv.from().x(), faceUv.from().y() };
             uvSize = new float[] { faceUv.to().x() - faceUv.from().x(), faceUv.to().y() - faceUv.from().y() };
         }
-
         switch (face) {
-            case NORTH -> {
-                North north = new North();
-                north.uv(uvs);
-                north.uvSize(uvSize);
-                north.materialInstance(texture);
-
-                uv.north(north);
-            }
-            case SOUTH -> {
-                South south = new South();
-                south.uv(uvs);
-                south.uvSize(uvSize);
-                south.materialInstance(texture);
-
-                uv.south(south);
-            }
-            case EAST -> {
-                East east = new East();
-                east.uv(uvs);
-                east.uvSize(uvSize);
-                east.materialInstance(texture);
-
-                uv.east(east);
-            }
-            case WEST -> {
-                West west = new West();
-                west.uv(uvs);
-                west.uvSize(uvSize);
-                west.materialInstance(texture);
-
-                uv.west(west);
-            }
-            case UP -> {
-                Up up = new Up();
-                up.uv(uvs);
-                up.uvSize(uvSize);
-                up.materialInstance(texture);
-
-                uv.up(up);
-            }
-            case DOWN -> {
-                Down down = new Down();
-                down.uv(uvs);
-                down.uvSize(uvSize);
-                down.materialInstance(texture);
-
-                uv.down(down);
-            }
+            case NORTH -> { North north = new North(); north.uv(uvs); north.uvSize(uvSize); north.materialInstance(texture); uv.north(north); }
+            case SOUTH -> { South south = new South(); south.uv(uvs); south.uvSize(uvSize); south.materialInstance(texture); uv.south(south); }
+            case EAST -> { East east = new East(); east.uv(uvs); east.uvSize(uvSize); east.materialInstance(texture); uv.east(east); }
+            case WEST -> { West west = new West(); west.uv(uvs); west.uvSize(uvSize); west.materialInstance(texture); uv.west(west); }
+            case UP -> { Up up = new Up(); up.uv(uvs); up.uvSize(uvSize); up.materialInstance(texture); uv.up(up); }
+            case DOWN -> { Down down = new Down(); down.uv(uvs); down.uvSize(uvSize); down.materialInstance(texture); uv.down(down); }
         }
     }
 }
