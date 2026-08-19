@@ -58,6 +58,9 @@ public final class VanillaPackProvider {
 
     private static final List<String> REQUIRED_ASSETS = List.of(); // While not used yet, it's possible we will need other assets as some point
 
+    // Hydraulic 26.2 needs matching client models when stitching mod resources.
+    private static final String VANILLA_VERSION = "26.2";
+
     /**
      * Downloads the vanilla jar from Mojang's servers.
      *
@@ -80,7 +83,7 @@ public final class VanillaPackProvider {
             // Get the url for the latest version of the games manifest
             String latestInfoURL = "";
             for (Version version : versionManifest.getVersions()) {
-                if (version.getId().equals("1.21.11")) { // TODO De-hardcode this
+                if (version.getId().equals(VANILLA_VERSION)) {
                     latestInfoURL = version.getUrl();
                     break;
                 }
