@@ -28,43 +28,33 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
-/**
- * Extracts the resource-pack portion of a Minecraft mod JAR.
- *
- * <p>Mod JARs commonly keep their client resources under {@code assets/} rather
- * than being distributed as standalone Java resource packs. PackConverter can
- * now consume those resources directly without requiring the user to unpack
- * the JAR first.</p>
- */
+/** Extracts resource-pack assets from Minecraft mod JARs. */
 public final class ModJarExtractor {
     private static final String ASSETS_PREFIX = "assets/";
 
     private ModJarExtractor() {
     }
 
-    /**
-     * Returns whether the supplied path looks like a mod JAR.
-     */
     public static boolean isModJar(@NotNull Path path) {
         String fileName = path.getFileName().toString().toLowerCase(Locale.ROOT);
         return fileName.endsWith(".jar") || fileName.endsWith(".jarx");
     }
 
-    /**
-     * Extracts resource-pack compatible content from a mod JAR.
-     *
-     * <p>Only {@code assets/}, {@code pack.mcmeta}, and {@code pack.png} are
-     * copied. Everything else in the mod (classes, metadata, mixins, data,
-     * signatures, etc.) is deliberately ignored.</p>
-     *
-     * @param jar the mod JAR
-     * @param destination empty destination directory
-     * @return the destination directory
-     */
+    /** Returns true when a directory contains at least one mod JAR directly inside it. */
+    public static boolean isModDirectory(@NotNull Path path) throws IOException {
+        if (!Files.isDirectory(path)) return false;
+        try (var files = Files.list(path)) {
+            return files.anyMatch(ModJarExtractor::isModJar);
+        }
+    }
+
+    /** Extract one mod JAR into a resource tree. Existing files are replaced. */
     public static @NotNull Path extract(@NotNull Path jar, @NotNull Path destination) throws IOException {
         Path root = destination.toAbsolutePath().normalize();
         Files.createDirectories(root);
@@ -73,25 +63,41 @@ public final class ModJarExtractor {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
                 String name = entry.getName().replace('\\', '/');
-                if (entry.isDirectory() || !isResourcePackEntry(name)) {
-                    continue;
-                }
+                if (entry.isDirectory() || !isResourcePackEntry(name)) continue;
 
-                // Reject absolute paths and traversal before resolving the entry.
                 Path target = root.resolve(name).normalize();
                 if (!target.startsWith(root)) {
                     throw new IOException("Unsafe mod JAR entry: " + name);
                 }
 
                 Path parent = target.getParent();
-                if (parent != null) {
-                    Files.createDirectories(parent);
-                }
-                Files.copy(zip, target);
+                if (parent != null) Files.createDirectories(parent);
+                Files.copy(zip, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
         }
-
         return root;
+    }
+
+    /**
+     * Merge all directly contained mod JARs in deterministic filename order.
+     * Later JARs override resources supplied by earlier JARs.
+     */
+    public static @NotNull List<Path> extractAll(@NotNull Path directory, @NotNull Path destination) throws IOException {
+        Path root = directory.toAbsolutePath().normalize();
+        if (!Files.isDirectory(root)) throw new IOException("Not a mod directory: " + directory);
+
+        List<Path> jars;
+        try (var files = Files.list(root)) {
+            jars = files.filter(Files::isRegularFile)
+                    .filter(ModJarExtractor::isModJar)
+                    .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT)))
+                    .toList();
+        }
+        if (jars.isEmpty()) throw new IOException("No mod JARs found in: " + directory);
+
+        Files.createDirectories(destination);
+        for (Path jar : jars) extract(jar, destination);
+        return List.copyOf(jars);
     }
 
     private static boolean isResourcePackEntry(String name) {
