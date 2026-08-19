@@ -31,6 +31,7 @@ import org.geysermc.pack.bedrock.resource.BedrockResourcePack;
 import org.geysermc.pack.converter.pipeline.ConverterPipeline;
 import org.geysermc.pack.converter.util.AnimatedTextureConverter;
 import org.geysermc.pack.converter.util.DefaultLogListener;
+import org.geysermc.pack.converter.util.GeckoLibAnimationConverter;
 import org.geysermc.pack.converter.util.LogListener;
 import org.geysermc.pack.converter.util.ModJarExtractor;
 import org.geysermc.pack.converter.util.NioDirectoryFileTreeReader;
@@ -153,6 +154,17 @@ public final class PackConverter {
                 if (animated > 0) logListener.info("Animated resource conversion added " + animated + " flipbook(s).");
             } catch (IOException exception) {
                 logListener.error("Failed to process animated textures.", exception);
+                errors++;
+            }
+
+            // GeckoLib keeps model animations in ordinary JSON files. Convert the
+            // data-only bone channels into Bedrock actor animations without loading
+            // the mod or GeckoLib itself.
+            try {
+                int boneAnimations = GeckoLibAnimationConverter.convert(effectiveSource, this.tmpDir, logListener);
+                if (boneAnimations > 0) logListener.info("Bone animation conversion added " + boneAnimations + " Bedrock animation file(s).");
+            } catch (IOException exception) {
+                logListener.error("Failed to process GeckoLib animations.", exception);
                 errors++;
             }
 
