@@ -66,7 +66,8 @@ public final class ModJarExtractor {
      * @return the destination directory
      */
     public static @NotNull Path extract(@NotNull Path jar, @NotNull Path destination) throws IOException {
-        Files.createDirectories(destination);
+        Path root = destination.toAbsolutePath().normalize();
+        Files.createDirectories(root);
 
         try (InputStream input = Files.newInputStream(jar); ZipInputStream zip = new ZipInputStream(input)) {
             ZipEntry entry;
@@ -77,8 +78,8 @@ public final class ModJarExtractor {
                 }
 
                 // Reject absolute paths and traversal before resolving the entry.
-                Path target = destination.resolve(name).normalize();
-                if (!target.startsWith(destination.toAbsolutePath().normalize())) {
+                Path target = root.resolve(name).normalize();
+                if (!target.startsWith(root)) {
                     throw new IOException("Unsafe mod JAR entry: " + name);
                 }
 
@@ -90,7 +91,7 @@ public final class ModJarExtractor {
             }
         }
 
-        return destination;
+        return root;
     }
 
     private static boolean isResourcePackEntry(String name) {
