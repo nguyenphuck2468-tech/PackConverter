@@ -46,9 +46,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.BiConsumer;
 
-/** Handles conversion of resource packs and Minecraft mod resource sets. */
+/** Handles the conversion of resource packs and Minecraft mod resource sets. */
 public final class PackConverter {
-    private static final String CONVERTER_CACHE_CONTEXT = "packconverter-26.2-cache-v2";
+    private static final String CONVERTER_CACHE_CONTEXT = "packconverter-26.2-cache-v3";
     private Path input;
     private Path output;
     private String packName;
@@ -133,13 +133,19 @@ public final class PackConverter {
             BedrockResourcePack bedrockResourcePack = new BedrockResourcePack(tmpDir);
             ConversionDiagnostics diagnostics = new ConversionDiagnostics();
 
-            String inputFingerprint;
-            String vanillaFingerprint;
             String cacheFingerprint;
             try {
-                inputFingerprint = ResourceFingerprint.sha256(effectiveSource);
-                vanillaFingerprint = ResourceFingerprint.sha256(vanillaPackPath);
-                cacheFingerprint = ResourceFingerprint.context(inputFingerprint, vanillaFingerprint, CONVERTER_CACHE_CONTEXT);
+                String inputFingerprint = ResourceFingerprint.sha256(effectiveSource);
+                String vanillaFingerprint = ResourceFingerprint.sha256(vanillaPackPath);
+                StringBuilder converterContext = new StringBuilder(CONVERTER_CACHE_CONTEXT)
+                        .append('\u0000').append(packName())
+                        .append('\u0000').append(textureSubdirectory == null ? "" : textureSubdirectory)
+                        .append('\u0000').append(packageHandler.getClass().getName())
+                        .append('\u0000').append(postProcessor == null ? "none" : postProcessor.getClass().getName());
+                for (ConverterPipeline<?, ?> converter : converters) {
+                    converterContext.append('\u0000').append(converter.getClass().getName());
+                }
+                cacheFingerprint = ResourceFingerprint.context(inputFingerprint, vanillaFingerprint, converterContext.toString());
             } catch (IOException exception) {
                 logListener.error("Failed to calculate conversion cache fingerprint.", exception);
                 throw new RuntimeException(exception);
