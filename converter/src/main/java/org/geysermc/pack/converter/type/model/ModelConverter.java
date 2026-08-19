@@ -52,12 +52,15 @@ import team.unnamed.creative.model.Element;
 import team.unnamed.creative.model.ElementFace;
 import team.unnamed.creative.model.ElementRotation;
 import team.unnamed.creative.model.Model;
+import team.unnamed.creative.model.ModelTexture;
 import team.unnamed.creative.texture.TextureUV;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public record ModelConverter(boolean convertItemModels) implements AssetExtractor<Model>, AssetConverter<Model, BedrockModel>, AssetCombiner<BedrockModel> {
     public static final ModelConverter INSTANCE = new ModelConverter(false);
@@ -65,6 +68,11 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
     private static final String FORMAT_VERSION = "1.16.0";
     private static final String GEOMETRY_FORMAT = "geometry.%s";
     private static final float[] ELEMENT_OFFSET = new float[] { 8, 0, 8 };
+    private static final Map<String, String> BEDROCK_TEXTURE_ROOTS = Map.of(
+            "block", "blocks",
+            "item", "items",
+            "gui", "ui"
+    );
 
     @Override
     public Collection<Model> extract(ResourcePack pack, ExtractionContext context) {
@@ -143,7 +151,7 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
                 CubeFace face = entry.getKey();
                 ElementFace elementFace = entry.getValue();
                 if (elementFace.uv() == null) continue;
-                String texture = elementFace.texture().replace("#", "");
+                String texture = resolveTexture(model, elementFace.texture());
                 applyUv(uv, face, texture, multiplyUv(elementFace.uv(), 16f));
             }
             cube.uv(uv);
@@ -158,6 +166,73 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
             return new BedrockModel(BedrockModel.ModelType.ENTITY, fileName + ".json", modelEntity);
         }
         return new BedrockModel(BedrockModel.ModelType.BLOCK, fileName + ".json", modelEntity);
+    }
+
+    private static String resolveTexture(Model model, String reference) {
+        if (reference == null || reference.isEmpty()) {
+            return "missingno";
+        }
+
+        String current = reference;
+        Set<String> visited = new HashSet<>();
+        Map<String, ModelTexture> variables = model.textures() == null
+                ? Map.of()
+                : model.textures().variables();
+
+        for (int i = 0; i < 32 && current.startsWith("#"); i++) {
+            String variable = current.substring(1);
+            if (!visited.add(variable)) {
+                return variable;
+            }
+
+            ModelTexture texture = variables.get(variable);
+            if (texture == null) {
+                return variable;
+            }
+
+            if (texture.key() != null) {
+                return normalizeTexture(texture.key().namespace(), texture.key().value());
+            }
+            if (texture.reference() == null || texture.reference().isEmpty()) {
+                return variable;
+            }
+            current = texture.reference();
+        }
+
+        if (current.startsWith("#")) {
+            return current.substring(1);
+        }
+
+        int namespaceSeparator = current.indexOf(':');
+        if (namespaceSeparator > 0) {
+            return normalizeTexture(
+                    current.substring(0, namespaceSeparator),
+                    current.substring(namespaceSeparator + 1)
+            );
+        }
+
+        return normalizeTexture(model.key().namespace(), current);
+    }
+
+    private static String normalizeTexture(String namespace, String path) {
+        path = path.replace("\\", "/");
+        if (path.startsWith("textures/")) {
+            path = path.substring("textures/".length());
+        }
+        if (path.endsWith(".png")) {
+            path = path.substring(0, path.length() - 4);
+        }
+
+        int slash = path.indexOf('/');
+        String root = slash == -1 ? path : path.substring(0, slash);
+        String bedrockRoot = BEDROCK_TEXTURE_ROOTS.getOrDefault(root, root);
+        String value = slash == -1 ? "" : path.substring(slash + 1);
+        String output = value.isEmpty() ? bedrockRoot : bedrockRoot + "/" + value;
+
+        if (!Key.MINECRAFT_NAMESPACE.equals(namespace)) {
+            return namespace + "/" + output;
+        }
+        return output;
     }
 
     @Override
