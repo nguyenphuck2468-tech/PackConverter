@@ -48,6 +48,7 @@ import java.util.function.BiConsumer;
 
 /** Handles conversion of resource packs and Minecraft mod resource sets. */
 public final class PackConverter {
+    private static final String CONVERTER_CACHE_CONTEXT = "packconverter-26.2-cache-v2";
     private Path input;
     private Path output;
     private String packName;
@@ -132,20 +133,27 @@ public final class PackConverter {
             BedrockResourcePack bedrockResourcePack = new BedrockResourcePack(tmpDir);
             ConversionDiagnostics diagnostics = new ConversionDiagnostics();
 
+            String inputFingerprint;
+            String vanillaFingerprint;
+            String cacheFingerprint;
             try {
-                String inputFingerprint = ResourceFingerprint.sha256(effectiveSource);
-                String vanillaFingerprint = Files.isDirectory(vanillaPackPath)
-                        ? ResourceFingerprint.sha256(vanillaPackPath)
-                        : ResourceFingerprint.sha256(vanillaPackPath.getParent());
-                String context = inputFingerprint + ":" + vanillaFingerprint + ":26.2";
+                inputFingerprint = ResourceFingerprint.sha256(effectiveSource);
+                vanillaFingerprint = ResourceFingerprint.sha256(vanillaPackPath);
+                cacheFingerprint = ResourceFingerprint.context(inputFingerprint, vanillaFingerprint, CONVERTER_CACHE_CONTEXT);
+            } catch (IOException exception) {
+                logListener.error("Failed to calculate conversion cache fingerprint.", exception);
+                throw new RuntimeException(exception);
+            }
+
+            try {
                 ConversionCache cache = new ConversionCache(cacheDir);
-                boolean outputExists = Files.exists(output) && Files.size(output) > 0;
+                boolean outputExists = Files.isRegularFile(output) && Files.size(output) > 0;
                 Optional<String> cached = useConversionCache ? cache.read() : Optional.empty();
-                if (outputExists && cached.isPresent() && cached.get().equals(inputFingerprint)) {
-                    logListener.info("Conversion cache hit; input resources are unchanged.");
+                if (outputExists && cached.isPresent() && cached.get().equals(cacheFingerprint)) {
+                    logListener.info("Conversion cache hit; source, vanilla pack and converter context are unchanged.");
                     return;
                 }
-                logListener.info(cached.isPresent() ? "Conversion cache miss; source context changed." : "Conversion cache miss; no valid cache entry.");
+                logListener.info(cached.isPresent() ? "Conversion cache miss; source, vanilla pack or converter context changed." : "Conversion cache miss; no valid cache entry.");
 
                 ResourceInventory inventory = ResourceInventory.scan(effectiveSource);
                 for (ResourceInventory.Resource resource : inventory.resources()) {
@@ -182,42 +190,42 @@ public final class PackConverter {
                 ModelOverrideAnalyzer.Result overrides = ModelOverrideAnalyzer.scan(effectiveSource, diagnostics);
                 if (overrides.overrides() > 0) logListener.info("Indexed " + overrides.overrides() + " model override(s) with " + overrides.predicates() + " predicate value(s).");
                 if (overrides.malformed() > 0) logListener.warn("Found " + overrides.malformed() + " malformed model override file(s).");
-
-                int errors = converters.stream().mapToInt(converter -> converter.convert(javaResourcePack,
-                        Optional.of(vanillaResourcePack), bedrockResourcePack, packName(), textureSubdirectory, logListener)).sum();
-                try {
-                    int animated = AnimatedTextureConverter.convert(effectiveSource, tmpDir, bedrockResourcePack, logListener, textureSubdirectory);
-                    if (animated > 0) diagnostics.converted("assets/*/*.png.mcmeta", "Converted " + animated + " animated texture(s) to Bedrock flipbooks");
-                } catch (IOException exception) {
-                    diagnostics.warning("assets/*/*.png.mcmeta", exception.getMessage() == null ? "Animation conversion failed" : exception.getMessage());
-                    logListener.error("Failed to process animated textures.", exception);
-                    errors++;
-                }
-                try {
-                    int boneAnimations = GeckoLibAnimationConverter.convert(effectiveSource, tmpDir, logListener);
-                    if (boneAnimations > 0) diagnostics.converted("animations/*.json", "Converted " + boneAnimations + " bone animation file(s)");
-                } catch (IOException exception) {
-                    diagnostics.warning("animations/*.json", exception.getMessage() == null ? "Bone animation conversion failed" : exception.getMessage());
-                    logListener.error("Failed to process GeckoLib animations.", exception);
-                    errors++;
-                }
-                if (postProcessor != null) postProcessor.accept(javaResourcePack, bedrockResourcePack);
-                bedrockResourcePack.export();
-                try {
-                    ConversionReport.write(tmpDir.resolve("packconverter-report.json"), diagnostics);
-                    logListener.info("Wrote conversion diagnostics to packconverter-report.json.");
-                } catch (IOException exception) {
-                    logListener.warn("Could not write conversion diagnostics: " + exception.getMessage());
-                }
-                if (errors > 0) logListener.warn("Pack conversion completed with " + errors + " errors!");
-                else {
-                    try { new ConversionCache(cacheDir).write(context.substring(0, 64)); }
-                    catch (IOException exception) { logListener.warn("Could not update conversion cache: " + exception.getMessage()); }
-                    logListener.info("Pack conversion completed successfully!");
-                }
             } catch (IOException exception) {
-                logListener.error("Failed to prepare conversion cache or analyze source resources.", exception);
-                throw new RuntimeException(exception);
+                diagnostics.warning("resource-analysis", exception.getMessage() == null ? "Resource analysis failed" : exception.getMessage());
+                logListener.error("Failed to analyze source resources.", exception);
+            }
+
+            int errors = converters.stream().mapToInt(converter -> converter.convert(javaResourcePack,
+                    Optional.of(vanillaResourcePack), bedrockResourcePack, packName(), textureSubdirectory, logListener)).sum();
+            try {
+                int animated = AnimatedTextureConverter.convert(effectiveSource, tmpDir, bedrockResourcePack, logListener, textureSubdirectory);
+                if (animated > 0) diagnostics.converted("assets/*/*.png.mcmeta", "Converted " + animated + " animated texture(s) to Bedrock flipbooks");
+            } catch (IOException exception) {
+                diagnostics.warning("assets/*/*.png.mcmeta", exception.getMessage() == null ? "Animation conversion failed" : exception.getMessage());
+                logListener.error("Failed to process animated textures.", exception);
+                errors++;
+            }
+            try {
+                int boneAnimations = GeckoLibAnimationConverter.convert(effectiveSource, tmpDir, logListener);
+                if (boneAnimations > 0) diagnostics.converted("animations/*.json", "Converted " + boneAnimations + " bone animation file(s)");
+            } catch (IOException exception) {
+                diagnostics.warning("animations/*.json", exception.getMessage() == null ? "Bone animation conversion failed" : exception.getMessage());
+                logListener.error("Failed to process GeckoLib animations.", exception);
+                errors++;
+            }
+            if (postProcessor != null) postProcessor.accept(javaResourcePack, bedrockResourcePack);
+            bedrockResourcePack.export();
+            try {
+                ConversionReport.write(tmpDir.resolve("packconverter-report.json"), diagnostics);
+                logListener.info("Wrote conversion diagnostics to packconverter-report.json.");
+            } catch (IOException exception) {
+                logListener.warn("Could not write conversion diagnostics: " + exception.getMessage());
+            }
+            if (errors > 0) logListener.warn("Pack conversion completed with " + errors + " errors!");
+            else {
+                try { new ConversionCache(cacheDir).write(cacheFingerprint); }
+                catch (IOException exception) { logListener.warn("Could not update conversion cache: " + exception.getMessage()); }
+                logListener.info("Pack conversion completed successfully!");
             }
         });
         return this;
