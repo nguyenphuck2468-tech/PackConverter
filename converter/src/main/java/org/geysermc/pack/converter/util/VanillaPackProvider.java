@@ -77,7 +77,7 @@ public final class VanillaPackProvider {
             VersionManifest versionManifest = GSON.fromJson(
                     WebUtils.getBody("https://launchermeta.mojang.com/mc/game/version_manifest.json"), VersionManifest.class);
 
-            // Get the url for the latest version of the games manifest
+            // Get the url for the target version's game manifest
             String latestInfoURL = "";
             for (Version version : versionManifest.getVersions()) {
                 if (version.getId().equals("26.2")) { // TODO De-hardcode this
