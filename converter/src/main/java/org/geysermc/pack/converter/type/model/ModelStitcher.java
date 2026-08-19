@@ -82,16 +82,21 @@ public class ModelStitcher {
             this.textureVariables.putAll(textures.variables());
         }
 
-        this.inheritTraits(baseModel);
+        // The base model is already copied above. Starting inheritance at the
+        // base model would copy its elements/textures a second time whenever it
+        // has a parent, producing duplicated geometry in the Bedrock model.
+        Key parentKey = baseModel.parent();
+        if (parentKey != null) {
+            Model parentModel = provider.model(parentKey);
+            if (parentModel == null) {
+                log.error("Could not find parent model " + parentKey + " for model " + baseModel.key());
+            } else {
+                this.inheritTraits(parentModel);
+            }
+        }
     }
 
     private void inheritTraits(@NotNull Model model) {
-        // If we have no parent model, that means this is as far as we're
-        // going to get with the base model.
-        if (model == this.baseModel && this.baseModel.parent() == null) {
-            return;
-        }
-
         List<Element> elements = model.elements();
         if (elements != null && !elements.isEmpty()) {
             this.elements.addAll(elements);
