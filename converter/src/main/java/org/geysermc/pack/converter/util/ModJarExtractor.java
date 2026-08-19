@@ -31,9 +31,11 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -60,34 +62,35 @@ public final class ModJarExtractor {
         return fileName.endsWith(".jar") || fileName.endsWith(".jarx");
     }
 
-    /** Returns whether a directory contains one or more mod JARs directly inside it. */
+    /** Returns whether a directory contains one or more mod JARs. */
     public static boolean isModDirectory(@NotNull Path path) throws IOException {
         if (!Files.isDirectory(path)) return false;
-        try (var files = Files.list(path)) {
-            return files.anyMatch(ModJarExtractor::isModJar);
+        try (var files = Files.walk(path)) {
+            return files.anyMatch(file -> Files.isRegularFile(file) && isModJar(file));
         }
     }
 
     /** Extracts one mod JAR into a resource-pack directory. */
     public static @NotNull Path extract(@NotNull Path jar, @NotNull Path destination) throws IOException {
-        extractInternal(jar, destination, new LinkedHashSet<>());
+        extractInternal(jar, destination, new LinkedHashSet<>(), new LinkedHashSet<>(), new LinkedHashMap<>());
         return destination.toAbsolutePath().normalize();
     }
 
     /**
-     * Extracts every mod JAR directly inside a directory in deterministic filename order.
+     * Extracts every mod JAR below a directory in deterministic relative-path order.
+     * Nested mod folders are supported, which makes this work with common modpack layouts.
      * If multiple mods contain the same resource, the later mod in sorted order wins and
-     * the collision is reported instead of being silently hidden.
+     * the collision is reported with both source JARs instead of being silently hidden.
      */
     public static @NotNull ExtractionReport extractAll(@NotNull Path directory, @NotNull Path destination) throws IOException {
         Path root = directory.toAbsolutePath().normalize();
         if (!Files.isDirectory(root)) throw new IOException("Not a mod directory: " + directory);
 
         List<Path> jars;
-        try (var files = Files.list(root)) {
+        try (var files = Files.walk(root)) {
             jars = files.filter(Files::isRegularFile)
                     .filter(ModJarExtractor::isModJar)
-                    .sorted(Comparator.comparing(path -> path.getFileName().toString().toLowerCase(Locale.ROOT)))
+                    .sorted(Comparator.comparing(path -> root.relativize(path).toString().toLowerCase(Locale.ROOT)))
                     .toList();
         }
 
@@ -96,19 +99,16 @@ public final class ModJarExtractor {
         Files.createDirectories(destination);
         Set<String> extracted = new LinkedHashSet<>();
         Set<String> collisions = new LinkedHashSet<>();
+        Map<String, Path> owners = new LinkedHashMap<>();
         int filesExtracted = 0;
         for (Path jar : jars) {
-            filesExtracted += extractInternal(jar, destination, extracted, collisions);
+            filesExtracted += extractInternal(jar, destination, extracted, collisions, owners);
         }
         return new ExtractionReport(jars, filesExtracted, new ArrayList<>(collisions));
     }
 
-    private static void extractInternal(Path jar, Path destination, Set<String> extracted) throws IOException {
-        extractInternal(jar, destination, extracted, new LinkedHashSet<>());
-    }
-
     private static int extractInternal(Path jar, Path destination, Set<String> extracted,
-                                       Set<String> collisions) throws IOException {
+                                       Set<String> collisions, Map<String, Path> owners) throws IOException {
         Path root = destination.toAbsolutePath().normalize();
         Files.createDirectories(root);
         int count = 0;
@@ -116,22 +116,42 @@ public final class ModJarExtractor {
         try (InputStream input = Files.newInputStream(jar); ZipInputStream zip = new ZipInputStream(input)) {
             ZipEntry entry;
             while ((entry = zip.getNextEntry()) != null) {
-                String name = entry.getName().replace('\\', '/');
+                String name = normalizeEntryName(entry.getName());
                 if (entry.isDirectory() || !isResourcePackEntry(name)) continue;
 
                 Path target = root.resolve(name).normalize();
                 if (!target.startsWith(root)) {
-                    throw new IOException("Unsafe mod JAR entry: " + name);
+                    throw new IOException("Unsafe mod JAR entry: " + entry.getName());
                 }
 
                 Path parent = target.getParent();
                 if (parent != null) Files.createDirectories(parent);
-                if (!extracted.add(name)) collisions.add(name);
+
+                Path previousOwner = owners.put(name, jar);
+                if (!extracted.add(name)) {
+                    String previous = previousOwner == null ? "unknown" : previousOwner.getFileName().toString();
+                    collisions.add(name + " (" + previous + " -> " + jar.getFileName() + ")");
+                }
+
                 Files.copy(zip, target, StandardCopyOption.REPLACE_EXISTING);
                 count++;
             }
         }
         return count;
+    }
+
+    private static String normalizeEntryName(String name) throws IOException {
+        String normalized = name.replace('\\', '/');
+        if (normalized.indexOf('\0') >= 0) {
+            throw new IOException("Unsafe NUL byte in mod JAR entry");
+        }
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        if (normalized.startsWith("/") || normalized.matches("^[A-Za-z]:/.*")) {
+            throw new IOException("Unsafe absolute mod JAR entry: " + name);
+        }
+        return normalized;
     }
 
     private static boolean isResourcePackEntry(String name) {
