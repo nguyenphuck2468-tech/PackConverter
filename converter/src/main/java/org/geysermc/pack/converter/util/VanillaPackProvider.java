@@ -54,6 +54,9 @@ public final class VanillaPackProvider {
     private static final Gson GSON = new GsonBuilder()
             .setPrettyPrinting().create();
 
+    private static final String TARGET_MINECRAFT_VERSION = "26.2";
+    private static final String VERSION_MARKER_SUFFIX = ".minecraft-version";
+
     private static final Map<String, Asset> ASSET_MAP = new HashMap<>();
 
     private static final List<String> REQUIRED_ASSETS = List.of(); // While not used yet, it's possible we will need other assets as some point
@@ -64,10 +67,20 @@ public final class VanillaPackProvider {
      * @param path The path to download the jar to.
      */
     public static void create(@NotNull Path path, @NotNull LogListener log) {
-        // Jar already exists; do nothing
+        Path versionMarker = path.resolveSibling(path.getFileName() + VERSION_MARKER_SUFFIX);
         if (Files.exists(path)) {
-            log.debug("Vanilla jar already exists, skipping download");
-            return;
+            try {
+                if (Files.exists(versionMarker) && TARGET_MINECRAFT_VERSION.equals(Files.readString(versionMarker).trim())) {
+                    log.debug("Vanilla jar already exists for Minecraft " + TARGET_MINECRAFT_VERSION + ", skipping download");
+                    return;
+                }
+
+                log.debug("Existing vanilla jar is not marked for Minecraft " + TARGET_MINECRAFT_VERSION + "; refreshing cache");
+                Files.deleteIfExists(path);
+            } catch (IOException exception) {
+                log.error("Unable to validate vanilla jar cache", exception);
+                return;
+            }
         }
 
         try {
@@ -80,7 +93,7 @@ public final class VanillaPackProvider {
             // Get the url for the target version's game manifest
             String latestInfoURL = "";
             for (Version version : versionManifest.getVersions()) {
-                if (version.getId().equals("26.2")) { // TODO De-hardcode this
+                if (version.getId().equals(TARGET_MINECRAFT_VERSION)) {
                     latestInfoURL = version.getUrl();
                     break;
                 }
@@ -94,10 +107,18 @@ public final class VanillaPackProvider {
             // Get the individual version manifest
             VersionInfo versionInfo = GSON.fromJson(WebUtils.getBody(latestInfoURL), VersionInfo.class);
 
+            if (!TARGET_MINECRAFT_VERSION.equals(versionInfo.getId())) {
+                throw new IOException("Resolved Minecraft version " + versionInfo.getId() + " instead of " + TARGET_MINECRAFT_VERSION);
+            }
+
             // Get the client jar for use when downloading the en_us locale
             log.debug(GSON.toJson(versionInfo.getDownloads()));
             VersionDownload clientJarInfo = versionInfo.getDownloads().get("client");
             log.debug(GSON.toJson(clientJarInfo));
+
+            if (clientJarInfo == null || clientJarInfo.getUrl() == null || clientJarInfo.getUrl().isBlank()) {
+                throw new IOException("Minecraft " + TARGET_MINECRAFT_VERSION + " has no client download entry");
+            }
 
             JsonObject assets = JsonParser.parseString(WebUtils.getBody(versionInfo.getAssetIndex().getUrl())).getAsJsonObject().get("objects").getAsJsonObject();
 
@@ -119,9 +140,15 @@ public final class VanillaPackProvider {
             PathUtils.copyFile(new URL(clientJarInfo.url), path);
             // Clean the jar
             clean(path, log);
-            log.info("Downloaded vanilla jar!");
+            Files.writeString(versionMarker, TARGET_MINECRAFT_VERSION);
+            log.info("Downloaded vanilla jar for Minecraft " + TARGET_MINECRAFT_VERSION + "!");
         } catch (IOException e) {
             log.error("Error downloading vanilla jar", e);
+            try {
+                Files.deleteIfExists(versionMarker);
+            } catch (IOException markerException) {
+                log.error("Error removing stale vanilla cache marker", markerException);
+            }
         }
     }
 
