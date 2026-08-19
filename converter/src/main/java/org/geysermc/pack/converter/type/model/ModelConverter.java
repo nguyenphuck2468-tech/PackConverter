@@ -45,7 +45,6 @@ import org.geysermc.pack.converter.pipeline.AssetConverter;
 import org.geysermc.pack.converter.pipeline.AssetExtractor;
 import org.geysermc.pack.converter.pipeline.CombineContext;
 import org.geysermc.pack.converter.pipeline.ConversionContext;
-import org.geysermc.pack.converter.pipeline.AssetExtractor;
 import org.geysermc.pack.converter.pipeline.ExtractionContext;
 import team.unnamed.creative.ResourcePack;
 import team.unnamed.creative.base.CubeFace;
@@ -100,8 +99,7 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
         // Bedrock resource packs combine many Java mods, so using only the
         // basename (e.g. machine.json) causes unrelated mods to overwrite
         // each other's models.
-        String relativePath = value;
-        String safePath = relativePath.replace('/', '_');
+        String safePath = value.replace('/', '_');
         String fileName = namespace + "__" + safePath;
         String geoName = (namespace.equals(Key.MINECRAFT_NAMESPACE) ? "minecraft." : namespace + ".") + safePath;
 
