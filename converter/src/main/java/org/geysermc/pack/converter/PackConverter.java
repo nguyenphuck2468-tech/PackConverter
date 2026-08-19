@@ -157,72 +157,78 @@ public final class PackConverter {
         ImageIO.scanForPlugins();
         VanillaPackProvider.create(this.vanillaPackPath, this.logListener);
 
-        Path conversionInput = this.input;
-        if (!this.compressed && this.autoExtractModResources && ModJarExtractor.isModDirectory(this.input)) {
-            Path absoluteOutput = this.output.toAbsolutePath().normalize();
-            Path outputParent = absoluteOutput.getParent();
-            if (outputParent == null) {
-                throw new IllegalArgumentException("Output must resolve to a filesystem path with a parent directory");
-            }
-
-            this.modResourceDir = outputParent.resolve(absoluteOutput.getFileName() + "_modresources");
-            if (Files.exists(this.modResourceDir)) {
-                PathUtils.delete(this.modResourceDir);
-            }
-
-            ModJarExtractor.ExtractionReport report = ModJarExtractor.extractAll(this.input, this.modResourceDir);
-            this.logListener.info("Extracted " + report.filesExtracted() + " resources from "
-                    + report.mods().size() + " mod JARs in deterministic order.");
-            if (!report.collisions().isEmpty()) {
-                this.logListener.warn("Detected " + report.collisions().size()
-                        + " duplicate resource paths; later sorted mods override earlier ones.");
-                for (String collision : report.collisions()) {
-                    this.logListener.warn("Resource override: " + collision);
+        try {
+            Path conversionInput = this.input;
+            if (!this.compressed && this.autoExtractModResources && ModJarExtractor.isModDirectory(this.input)) {
+                Path absoluteOutput = this.output.toAbsolutePath().normalize();
+                Path outputParent = absoluteOutput.getParent();
+                if (outputParent == null) {
+                    throw new IllegalArgumentException("Output must resolve to a filesystem path with a parent directory");
                 }
+
+                this.modResourceDir = outputParent.resolve(absoluteOutput.getFileName() + "_modresources");
+                if (Files.exists(this.modResourceDir)) {
+                    PathUtils.delete(this.modResourceDir);
+                }
+
+                ModJarExtractor.ExtractionReport report = ModJarExtractor.extractAll(this.input, this.modResourceDir);
+                this.logListener.info("Extracted " + report.filesExtracted() + " resources ("
+                        + report.bytesExtracted() + " bytes) from " + report.mods().size()
+                        + " mod JARs in deterministic order.");
+                if (!report.collisions().isEmpty()) {
+                    this.logListener.warn("Detected " + report.collisions().size()
+                            + " duplicate resource paths; later sorted mods override earlier ones.");
+                    for (String collision : report.collisions()) {
+                        this.logListener.warn("Resource override: " + collision);
+                    }
+                }
+                conversionInput = this.modResourceDir;
             }
-            conversionInput = this.modResourceDir;
+
+            Path sourceInput = conversionInput;
+            ZipUtils.openFileSystem(sourceInput, this.compressed && sourceInput.equals(this.input), input -> {
+                if (this.enforcePackCheck && !Files.exists(input.resolve("pack.mcmeta"))) {
+                    throw new IllegalArgumentException("Invalid Java Edition resource pack. No pack.mcmeta found.");
+                }
+
+                Path absoluteOutput = this.output.toAbsolutePath().normalize();
+                Path outputParent = absoluteOutput.getParent();
+                if (outputParent == null) {
+                    throw new IllegalArgumentException("Output must resolve to a filesystem path with a parent directory");
+                }
+
+                this.tmpDir = outputParent.resolve(absoluteOutput.getFileName() + "_mcpack");
+                if (Files.exists(this.tmpDir)) {
+                    PathUtils.delete(this.tmpDir);
+                }
+
+                ResourcePack javaResourcePack = (this.compressed && sourceInput.equals(this.input))
+                        ? MinecraftResourcePackReader.minecraft().readFromZipFile(sourceInput)
+                        : MinecraftResourcePackReader.minecraft().read(NioDirectoryFileTreeReader.read(sourceInput));
+                ResourcePack vanillaResourcePack = MinecraftResourcePackReader.minecraft().readFromZipFile(vanillaPackPath);
+                BedrockResourcePack bedrockResourcePack = new BedrockResourcePack(this.tmpDir);
+
+                int errors = converters.stream()
+                        .mapToInt(converter -> converter.convert(javaResourcePack, Optional.of(vanillaResourcePack),
+                                bedrockResourcePack, packName(), textureSubdirectory, logListener))
+                        .sum();
+
+                if (this.postProcessor != null) {
+                    this.postProcessor.accept(javaResourcePack, bedrockResourcePack);
+                }
+                bedrockResourcePack.export();
+
+                if (errors > 0) {
+                    this.logListener.warn("Pack conversion completed with " + errors + " errors!");
+                } else {
+                    this.logListener.info("Pack conversion completed successfully!");
+                }
+            });
+            return this;
+        } catch (IOException | RuntimeException exception) {
+            cleanup();
+            throw exception;
         }
-
-        Path sourceInput = conversionInput;
-        ZipUtils.openFileSystem(sourceInput, this.compressed && sourceInput.equals(this.input), input -> {
-            if (this.enforcePackCheck && !Files.exists(input.resolve("pack.mcmeta"))) {
-                throw new IllegalArgumentException("Invalid Java Edition resource pack. No pack.mcmeta found.");
-            }
-
-            Path absoluteOutput = this.output.toAbsolutePath().normalize();
-            Path outputParent = absoluteOutput.getParent();
-            if (outputParent == null) {
-                throw new IllegalArgumentException("Output must resolve to a filesystem path with a parent directory");
-            }
-
-            this.tmpDir = outputParent.resolve(absoluteOutput.getFileName() + "_mcpack");
-            if (Files.exists(this.tmpDir)) {
-                PathUtils.delete(this.tmpDir);
-            }
-
-            ResourcePack javaResourcePack = (this.compressed && sourceInput.equals(this.input))
-                    ? MinecraftResourcePackReader.minecraft().readFromZipFile(sourceInput)
-                    : MinecraftResourcePackReader.minecraft().read(NioDirectoryFileTreeReader.read(sourceInput));
-            ResourcePack vanillaResourcePack = MinecraftResourcePackReader.minecraft().readFromZipFile(vanillaPackPath);
-            BedrockResourcePack bedrockResourcePack = new BedrockResourcePack(this.tmpDir);
-
-            int errors = converters.stream()
-                    .mapToInt(converter -> converter.convert(javaResourcePack, Optional.of(vanillaResourcePack),
-                            bedrockResourcePack, packName(), textureSubdirectory, logListener))
-                    .sum();
-
-            if (this.postProcessor != null) {
-                this.postProcessor.accept(javaResourcePack, bedrockResourcePack);
-            }
-            bedrockResourcePack.export();
-
-            if (errors > 0) {
-                this.logListener.warn("Pack conversion completed with " + errors + " errors!");
-            } else {
-                this.logListener.info("Pack conversion completed successfully!");
-            }
-        });
-        return this;
     }
 
     private void validateConfiguration() {
