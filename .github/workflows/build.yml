@@ -25,6 +25,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Checkout PackConverter
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Get Release Info
         id: release-info
         uses: GeyserMC/actions/previous-release@master
@@ -39,7 +44,10 @@ jobs:
       - name: Verify repository hygiene
         run: |
           test ! -e gradle/wrapper/gradle-wrapper.jar
-          git ls-files | grep -E '(^|/)(build|out)/|\\.gradle/|gradle/wrapper/gradle-wrapper\\.jar$' && exit 1 || true
+          if git ls-files | grep -E '(^|/)(build|out)/|\\.gradle/|gradle/wrapper/gradle-wrapper\\.jar$'; then
+            echo 'Tracked generated build output or Gradle wrapper binary detected.'
+            exit 1
+          fi
 
       - name: Build PackConverter
         run: ./gradlew clean build --no-daemon
@@ -66,7 +74,7 @@ jobs:
         id: get-version
         run: |
           version=$(cat gradle.properties | grep -o "version=[0-9\\.]*" | cut -d"=" -f2)
-          echo "VERSION=${version}" >> $GITHUB_OUTPUT
+          echo "VERSION=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Get Release Metadata
         if: ${{ (success() || failure()) && github.repository == 'GeyserMC/PackConverter' }}
