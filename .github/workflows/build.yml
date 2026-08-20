@@ -20,6 +20,9 @@ concurrency:
   group: packconverter-build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GRADLE_VERSION: '9.5.1'
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -30,27 +33,34 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
       - name: Get Release Info
         id: release-info
         uses: GeyserMC/actions/previous-release@master
         with:
           data: ${{ vars.RELEASEACTION_PREVRELEASE }}
 
-      - name: Setup Gradle
-        uses: GeyserMC/actions/setup-gradle-composite@master
-        with:
-          setup-java_java-version: 25
-
       - name: Verify repository hygiene
         run: |
           test ! -e gradle/wrapper/gradle-wrapper.jar
-          if git ls-files | grep -E '(^|/)(build|out)/|\\.gradle/|gradle/wrapper/gradle-wrapper\\.jar$'; then
+          if git ls-files | grep -E '(^|/)(build|out)/|\.gradle/|gradle/wrapper/gradle-wrapper\.jar$'; then
             echo 'Tracked generated build output or Gradle wrapper binary detected.'
             exit 1
           fi
 
       - name: Build PackConverter
-        run: ./gradlew clean build --no-daemon
+        run: gradle clean build --no-daemon --stacktrace
         env:
           BUILD_NUMBER: ${{ steps.release-info.outputs.curentRelease }}
 
@@ -63,7 +73,7 @@ jobs:
 
       - name: Publish to Maven Repository
         if: ${{ success() && github.repository == 'GeyserMC/PackConverter' && github.ref_name == 'master' }}
-        run: ./gradlew publish --no-daemon
+        run: gradle publish --no-daemon
         env:
           BUILD_NUMBER: ${{ steps.release-info.outputs.curentRelease }}
           ORG_GRADLE_PROJECT_geysermcUsername: ${{ vars.DEPLOY_USER }}
