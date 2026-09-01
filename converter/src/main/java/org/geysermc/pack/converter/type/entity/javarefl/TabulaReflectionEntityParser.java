@@ -319,13 +319,17 @@ public final class TabulaReflectionEntityParser implements EntityModelParser {
             } catch (IllegalAccessException ignored) {
             }
         }
+        boolean hasCubes = false;
         for (PartRef part : parts) {
             List<CubeSpec> partCubes = readAdvancedModelBoxes(part.value(), false);
-            if (partCubes.isEmpty()) continue;
+            hasCubes |= !partCubes.isEmpty();
             bones.add(new BoneSpec(part.name(), parentName(part.value(), parts, names),
                     pivot(part.value()), rotation(part.value()), partCubes));
         }
-        return bones.isEmpty() ? null : new ModelCubeData(bones, texW, texH);
+        // Empty structural bones still carry the parent transform for their
+        // descendants. Dropping them leaves children pointing at a missing
+        // parent and breaks both the rest pose and all bone animations.
+        return !hasCubes ? null : new ModelCubeData(bones, texW, texH);
     }
 
     private static Map<String, String> indexModelClasses(Path modJar) {

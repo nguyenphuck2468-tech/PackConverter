@@ -60,6 +60,7 @@ class TabulaReflectionEntityParserTest {
         assertEquals(2, bones.size());
         assertEquals(null, body.parent());
         assertEquals("body", tail.parent());
+        assertTrue(body.cubes().isEmpty(), "an empty structural parent must be preserved");
         assertEquals(90f, body.rotation()[0], 0.001f, "Java radians must be converted to Bedrock degrees");
         assertEquals(45f, tail.rotation()[1], 0.001f, "child rest rotation must remain on its bone");
         assertEquals(4f, tail.cubes().getFirst().size()[0], 0.001f, "part X scale must be baked into cube size");
@@ -127,7 +128,7 @@ class TabulaReflectionEntityParserTest {
                     public ModelGood() { body.childModels.add(tail); }
                     public static final class Part {
                         public final List<Part> childModels = new ArrayList<>();
-                        public final List<Box> cubeList = List.of(new Box());
+                        public final List<Box> cubeList;
                         public float defaultPositionX, defaultPositionY, defaultPositionZ;
                         public float defaultRotationX, defaultRotationY, defaultRotationZ;
                         public float scaleX, scaleY, scaleZ;
@@ -136,6 +137,7 @@ class TabulaReflectionEntityParserTest {
                             defaultPositionX = x; defaultPositionY = y; defaultPositionZ = z;
                             defaultRotationX = rx; defaultRotationY = ry; defaultRotationZ = rz;
                             scaleX = sx; scaleY = sy; scaleZ = sz;
+                            cubeList = x == 1 ? List.of() : List.of(new Box());
                         }
                     }
                     public static final class Box {

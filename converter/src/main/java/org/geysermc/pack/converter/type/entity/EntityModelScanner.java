@@ -95,6 +95,11 @@ public final class EntityModelScanner {
                     if (detail != null) result.recordDiagnostic(parser.id(), path, detail);
                     continue;
                 }
+                String invalid = EntityGeometryValidator.invalidReason(model);
+                if (invalid != null) {
+                    result.recordDiagnostic(parser.id(), path, "invalid geometry: " + invalid);
+                    continue;
+                }
                 String packKey = "models/entity/" + model.fileName();
                 if (target.entityModels() != null && target.entityModels().containsKey(packKey)) {
                     result.recordDuplicate(parser.id(), model.fileName());
@@ -131,8 +136,13 @@ public final class EntityModelScanner {
             try {
                 BedrockModel model = reflection.parse(entityId + ".reflection", source, input);
                 if (model != null) {
-                    target.addEntityModel(model.model(), model.fileName());
-                    result.recordSuccess(reflection.id(), model.fileName());
+                    String invalid = EntityGeometryValidator.invalidReason(model);
+                    if (invalid == null) {
+                        target.addEntityModel(model.model(), model.fileName());
+                        result.recordSuccess(reflection.id(), model.fileName());
+                    } else {
+                        result.recordDiagnostic(reflection.id(), entityId, "invalid geometry: " + invalid);
+                    }
                 } else {
                     String detail = reflection.failureDetail(entityId + ".reflection");
                     if (detail != null) result.recordDiagnostic(reflection.id(), entityId, detail);
