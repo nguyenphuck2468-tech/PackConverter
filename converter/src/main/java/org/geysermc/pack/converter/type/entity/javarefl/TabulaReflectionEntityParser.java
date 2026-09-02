@@ -38,6 +38,7 @@ import org.geysermc.pack.converter.type.model.BedrockModel;
 import team.unnamed.creative.ResourcePack;
 
 import java.io.IOException;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -264,7 +265,7 @@ public final class TabulaReflectionEntityParser implements EntityModelParser {
             Object modelInstance;
             try {
                 modelClass = loader.loadClass(candidate);
-                modelInstance = modelClass.getDeclaredConstructor().newInstance();
+                modelInstance = instantiateModel(modelClass);
             } catch (LinkageError | ReflectiveOperationException | SecurityException exception) {
                 String failure = reason(exception);
                 failedClasses.putIfAbsent(candidate, failure);
@@ -284,6 +285,45 @@ public final class TabulaReflectionEntityParser implements EntityModelParser {
             if (data != null) return new ModelLoadResult(data, null);
         }
         return new ModelLoadResult(null, firstFailure);
+    }
+
+    /**
+     * Model constructors commonly expose only render-layer inflation as one or
+     * more floating-point arguments. Zero selects the base model used by
+     * renderers and is safe to reproduce without knowing the mod. Integral
+     * values, flags, context objects and enums are deliberately rejected:
+     * guessing those can silently export the wrong entity part or model mode.
+     */
+    private static Object instantiateModel(Class<?> modelClass) throws ReflectiveOperationException {
+        try {
+            Constructor<?> constructor = modelClass.getDeclaredConstructor();
+            constructor.setAccessible(true);
+            return constructor.newInstance();
+        } catch (NoSuchMethodException ignored) {
+            Constructor<?>[] constructors = modelClass.getDeclaredConstructors();
+            java.util.Arrays.sort(constructors, java.util.Comparator
+                    .comparingInt((Constructor<?> constructor) -> constructor.getParameterCount())
+                    .thenComparing(Constructor::toGenericString));
+            for (Constructor<?> constructor : constructors) {
+                Object[] arguments = defaultInflationArguments(constructor.getParameterTypes());
+                if (arguments == null) continue;
+                constructor.setAccessible(true);
+                return constructor.newInstance(arguments);
+            }
+            throw new NoSuchMethodException(modelClass.getName() + " has no no-arg or floating-point-only constructor; available="
+                    + java.util.Arrays.stream(constructors).map(Constructor::toGenericString).toList());
+        }
+    }
+
+    private static Object[] defaultInflationArguments(Class<?>[] parameterTypes) {
+        Object[] arguments = new Object[parameterTypes.length];
+        for (int index = 0; index < parameterTypes.length; index++) {
+            Class<?> type = parameterTypes[index];
+            if (type == float.class) arguments[index] = 0F;
+            else if (type == double.class) arguments[index] = 0D;
+            else return null;
+        }
+        return arguments;
     }
 
     private static ModelCubeData extractModelData(URLClassLoader loader, Class<?> modelClass, Object modelInstance) {
