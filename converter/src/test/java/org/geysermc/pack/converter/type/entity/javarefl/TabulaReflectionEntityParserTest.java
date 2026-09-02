@@ -60,6 +60,7 @@ class TabulaReflectionEntityParserTest {
         assertEquals(2, bones.size());
         assertEquals(null, body.parent());
         assertEquals("body", tail.parent());
+        assertTrue(body.cubes().isEmpty(), "an empty structural parent must be preserved");
         assertEquals(90f, body.rotation()[0], 0.001f, "Java radians must be converted to Bedrock degrees");
         assertEquals(45f, tail.rotation()[1], 0.001f, "child rest rotation must remain on its bone");
         assertEquals(4f, tail.cubes().getFirst().size()[0], 0.001f, "part X scale must be baked into cube size");
@@ -88,6 +89,22 @@ class TabulaReflectionEntityParserTest {
         assertNotNull(secondConversion.join().entityModels().get("models/entity/second.good.json"));
         assertEquals(new TabulaReflectionEntityParser.CacheState(2, 0), TabulaReflectionEntityParser.cacheStateForTests(),
                 "distinct mod jars must never share a reflection runtime");
+    }
+
+    @Test
+    void suppliesDefaultsOnlyToFloatingPointModelConstructors() throws Exception {
+        Path jar = tempDir.resolve("constructor-fixture.jar");
+        writeModelJar(jar);
+
+        BedrockResourcePack target = new BedrockResourcePack(tempDir.resolve("constructor-output"));
+        EntityModelScanner.ScanResult result = EntityModelScanner.discover().addReflectionEntityModels(null, target,
+                List.of("example:scaled", "example:contextual"), new ReflectionInput(jar, List.of(), null));
+
+        assertEquals(1, result.successCount());
+        assertNotNull(target.entityModels().get("models/entity/example.scaled.json"));
+        assertEquals(1, result.diagnostics().size());
+        assertTrue(result.diagnostics().getFirst().detail().contains("has no no-arg or floating-point-only constructor"));
+        assertTrue(result.diagnostics().getFirst().detail().contains("ModelContextual"));
     }
 
     @Test
@@ -127,7 +144,7 @@ class TabulaReflectionEntityParserTest {
                     public ModelGood() { body.childModels.add(tail); }
                     public static final class Part {
                         public final List<Part> childModels = new ArrayList<>();
-                        public final List<Box> cubeList = List.of(new Box());
+                        public final List<Box> cubeList;
                         public float defaultPositionX, defaultPositionY, defaultPositionZ;
                         public float defaultRotationX, defaultRotationY, defaultRotationZ;
                         public float scaleX, scaleY, scaleZ;
@@ -136,6 +153,7 @@ class TabulaReflectionEntityParserTest {
                             defaultPositionX = x; defaultPositionY = y; defaultPositionZ = z;
                             defaultRotationX = rx; defaultRotationY = ry; defaultRotationZ = rz;
                             scaleX = sx; scaleY = sy; scaleZ = sz;
+                            cubeList = x == 1 ? List.of() : List.of(new Box());
                         }
                     }
                     public static final class Box {
@@ -157,10 +175,24 @@ class TabulaReflectionEntityParserTest {
                     }
                 }
                 """);
+        Files.writeString(source.resolve("ModelScaled.java"), """
+                package example.client.model;
+                public final class ModelScaled extends ModelGood {
+                    public ModelScaled(float inflation) {}
+                }
+                """);
+        Files.writeString(source.resolve("ModelContextual.java"), """
+                package example.client.model;
+                public final class ModelContextual extends ModelGood {
+                    public enum Part { HEAD, BODY }
+                    public ModelContextual(Part part) {}
+                }
+                """);
 
         assertEquals(0, ToolProvider.getSystemJavaCompiler().run(null, null, null, "-d", classes.toString(),
                 source.resolve("ModelGood.java").toString(), source.resolve("ModelOther.java").toString(),
-                source.resolve("ModelBroken.java").toString()));
+                source.resolve("ModelBroken.java").toString(), source.resolve("ModelScaled.java").toString(),
+                source.resolve("ModelContextual.java").toString()));
 
         try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(jar));
              var files = Files.walk(classes)) {
