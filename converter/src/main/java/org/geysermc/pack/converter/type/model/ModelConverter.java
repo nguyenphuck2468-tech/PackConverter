@@ -172,12 +172,34 @@ public record ModelConverter(boolean convertItemModels) implements AssetExtracto
 
         modelEntity.geometry(List.of(geometry));
 
-        if (model.key().namespace().contains("entity")) {
-            return new BedrockModel(BedrockModel.ModelType.ENTITY, fileName + ".json", modelEntity);
-        } else {
-            // Bedrock only has a concept of entity or block models
-            return new BedrockModel(BedrockModel.ModelType.BLOCK, fileName + ".json", modelEntity);
+        // Java resource-pack element models are not runtime mob models. In
+        // particular, a mod namespace containing "entity" must not bypass the
+        // block bounds check or move a referenced block into the entity folder.
+        if (!value.startsWith("item/")) {
+            String failure = BlockModelBounds.failure(bones);
+            if (failure != null) {
+                context.warn("Block model " + model.key() + " geometry FAILED(" + failure
+                        + "); using an explicit unit-cube replacement with the same geometry identifier");
+                // Keep registration and material references valid. Dropping the
+                // model here would leave Hydraulic's already-defined blocks
+                // pointing at missing geometry. Do not clip individual cubes.
+                Cubes replacement = new Cubes();
+                replacement.origin(new float[] {-8, 0, -8});
+                replacement.size(new float[] {16, 16, 16});
+                String texture = elements.stream().flatMap(element -> element.faces().values().stream())
+                        .map(ElementFace::texture).sorted().findFirst().orElse("#*").replace("#", "");
+                Uv replacementUv = new Uv();
+                for (CubeFace face : CubeFace.values()) {
+                    applyUv(replacementUv, face, texture, TextureUV.uv(0, 0, 16, 16));
+                }
+                replacement.uv(replacementUv);
+                Bones replacementBone = new Bones();
+                replacementBone.name("bounds_replacement");
+                replacementBone.cubes(List.of(replacement));
+                geometry.bones(List.of(replacementBone));
+            }
         }
+        return new BedrockModel(BedrockModel.ModelType.BLOCK, fileName + ".json", modelEntity);
     }
 
     @Override

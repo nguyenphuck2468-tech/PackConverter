@@ -11,6 +11,10 @@ sourceSets {
 }
 
 dependencies {
+    testImplementation(project(":bedrock-pack-schema"))
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     api(project(":pack-schema-api"))
     compileOnly(project(":bedrock-pack-schema")) // Is provided by pack-schema-api for consumers, but not for us during compile time
     implementation("com.google.code.gson:gson:2.10.1")
@@ -29,4 +33,11 @@ dependencies {
 
 java {
     withSourcesJar()
+}
+
+tasks.test {
+    useJUnitPlatform()
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(providers.gradleProperty("testJavaVersion").getOrElse("21")))
+    })
 }
