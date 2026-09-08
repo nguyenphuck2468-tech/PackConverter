@@ -240,4 +240,4 @@ gradle-app.setting
 .idea/*
 !.idea/copyright/
 
-test/
+/test/
