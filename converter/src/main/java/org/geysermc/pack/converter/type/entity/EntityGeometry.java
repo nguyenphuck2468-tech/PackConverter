@@ -66,7 +66,9 @@ final class EntityGeometry {
         double[] scale = {number(field(part, "scaleX")), number(field(part, "scaleY")), number(field(part, "scaleZ"))};
         boolean scaled = scale[0] != 1 || scale[1] != 1 || scale[2] != 1;
         require(!scaled || !Boolean.TRUE.equals(field(part, "scaleChildren")), "Unsupported inherited part scale");
-        for (double value : scale) require(value > 0, "Unsupported non-positive part scale");
+        // Citadel clamps the reciprocal used before rendering children at 1e-4.
+        // Below that threshold the scale also affects children even when scaleChildren=false.
+        for (double value : scale) require(value >= 1e-4, "Unsupported tiny/non-positive part scale");
         for (String axis : List.of("X", "Y", "Z")) {
             require(number(field(part, "offset" + axis)) == 0, "Unsupported part render offset");
         }

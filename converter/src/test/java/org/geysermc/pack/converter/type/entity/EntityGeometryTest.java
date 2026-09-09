@@ -77,6 +77,7 @@ class EntityGeometryTest {
     public static class NonFinite extends Model { public NonFinite() { child.rotationPointX=Float.NaN; } }
     public static class Scaled extends Model { public Scaled() { child.scaleX=2; child.scaleChildren=true; } }
     public static class LocalScale extends Model { public LocalScale() { child.scaleX=1.1f; } }
+    public static class TinyScale extends Model { public TinyScale() { child.scaleX=0.00001f; } }
     public static class Asymmetric extends Model {
         public Asymmetric() { child.rotationPointX=3; child.rotateAngleX=0.2f; child.rotateAngleY=-0.3f; child.rotateAngleZ=0.4f; }
     }
@@ -133,7 +134,7 @@ class EntityGeometryTest {
     }
 
     @Test void rejectsBrokenTreesAndUnsupportedTransforms() {
-        for (Class<?> type:List.of(Cycle.class,MissingChild.class,SharedChild.class,NonFinite.class,Scaled.class,TooDeep.class)) {
+        for (Class<?> type:List.of(Cycle.class,MissingChild.class,SharedChild.class,NonFinite.class,Scaled.class,TinyScale.class,TooDeep.class)) {
             assertThrows(IllegalArgumentException.class,()->EntityGeometry.read(type,"geometry.test.model"),type.getName());
         }
     }

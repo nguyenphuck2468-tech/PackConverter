@@ -26,6 +26,8 @@ The two intermediate X flips cancel. Face names follow the codec convention (eas
 
 The encoder emits the cube subset of [Bedrock geometry 1.16.0](https://learn.microsoft.com/en-us/minecraft/creator/reference/content/schemasreference/schemas/minecraftschema_geometry_1.16.0?view=minecraft-bedrock-stable). Its built-in validator checks the emitted subset's vector shapes, identifiers, texture dimensions, non-negative sizes, face keys, finite numbers and parent graph. This is not a complete official-schema validator for arbitrary Bedrock geometry. Implementation resource caps are 1,024 parts, depth 128, 16,384 cubes, texture dimensions 16,384 and finite numeric magnitude 1,000,000. These are not claims about Bedrock's universal engine limits. There is no 30-pixel or base-block-overlap restriction; a 40-pixel cube regression covers that separation.
 
+Scales below 0.0001 are explicitly rejected: Citadel clamps its reciprocal scale when descending to children, so treating those values as purely local would change the hierarchy's rendered pose.
+
 ## Actual supplied fixtures and remaining gates
 
 **VERIFIED (2026-09-09, local Java 25):** `:converter:test -PtestJavaVersion=25 -PentityFixtureClasspath=... --offline` passed 32 tests, zero failures and zero skips. This includes 12 geometry/process tests, the exact Bald Eagle JAR/golden test, the second mod's explicit-unsupported test, and 18 existing/shared-path tests. Successful conversion coverage is one selected model in one mod, not all mobs in either mod.
