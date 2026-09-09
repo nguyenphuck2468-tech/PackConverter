@@ -1,0 +1,17 @@
+{
+  "provenance": "MutantMonsters-v26.2.2-mc26.2.x-Fabric.jar SHA256 618b07e168abc83ebbdb548f5247eda0cabc90a40fa0e4ed3a587cbf2ce82e71; javap createBodyLayer(CubeDeformation.NONE); AGPL-3.0-or-later",
+  "parts": [
+    {"name":"pelvis","parent":"root","offset":[0,14,-3],"rotation":[-0.7853982,0,0],"origin":[-5,-14,-4],"size":[10,14,8],"uv":[0,0],"mirror":false},
+    {"name":"body","parent":"pelvis","offset":[0,-12,0],"rotation":[0.9424778,0,0],"origin":[-4.5,-14,-3.5],"size":[9,16,7],"uv":[36,0],"mirror":false},
+    {"name":"neck","parent":"body","offset":[0,-11,1],"rotation":[1.0471976,0,0],"origin":[-4,-14,-3],"size":[8,14,6],"uv":[68,0],"mirror":false},
+    {"name":"head","parent":"neck","offset":[0,-12,1],"rotation":[0.5235988,0,0],"origin":[-5,-12,-5],"size":[10,12,10],"uv":[0,22],"mirror":false},
+    {"name":"front_right_leg","parent":"pelvis","offset":[3,0,0],"rotation":[0.31415927,-0.7853982,0],"origin":[-3,-4,-14],"size":[6,4,14],"uv":[40,24],"mirror":false},
+    {"name":"front_right_fore_leg","parent":"front_right_leg","offset":[0,-4,-14],"rotation":[-0.20943952,0.3926991,0],"origin":[-3.5,0,-4],"size":[7,20,8],"uv":[96,0],"mirror":false},
+    {"name":"front_left_leg","parent":"pelvis","offset":[-3,0,0],"rotation":[0.31415927,0.7853982,0],"origin":[-3,-4,-14],"size":[6,4,14],"uv":[40,24],"mirror":true},
+    {"name":"front_left_fore_leg","parent":"front_left_leg","offset":[0,-4,-14],"rotation":[-0.20943952,-0.3926991,0],"origin":[-3.5,0,-4],"size":[7,20,8],"uv":[96,0],"mirror":true},
+    {"name":"back_right_leg","parent":"pelvis","offset":[2,-2,4],"rotation":[0.9,0.62831855,0],"origin":[-2,-4,0],"size":[4,4,14],"uv":[0,44],"mirror":false},
+    {"name":"back_right_fore_leg","parent":"back_right_leg","offset":[0,-4,14],"rotation":[0.48332196,0,0],"origin":[-3,0,-3],"size":[6,18,6],"uv":[80,28],"mirror":false},
+    {"name":"back_left_leg","parent":"pelvis","offset":[-2,-2,4],"rotation":[0.9,-0.62831855,0],"origin":[-2,-4,0],"size":[4,4,14],"uv":[0,44],"mirror":true},
+    {"name":"back_left_fore_leg","parent":"back_left_leg","offset":[0,-4,14],"rotation":[0.48332196,0,0],"origin":[-3,0,-3],"size":[6,18,6],"uv":[80,28],"mirror":true}
+  ]
+}

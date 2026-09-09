@@ -1,5 +1,7 @@
 # Static entity geometry: explicit opt-in API
 
+This document records the Citadel checkpoint at `6b088bf`. The subsequent, separate [ModelPart reader checkpoint](entity-modelpart-reader.md) adds an explicit layer API; it does not alter the Citadel reader or make its existing default API discover ModelPart inputs.
+
 This change adds `EntityConverter.convert(Input)` and `convertTo(...)`. It is **not** wired into `AssetConverters`, Hydraulic's pack discovery/cache, or Geyser registration. It does not claim a complete entity pipeline. No mechanisms from Hydraulic PR #5 are restored. Block geometry PR #7 is unchanged; entity data never enters `BlockModelBounds`.
 
 ## Exact input and execution boundary
