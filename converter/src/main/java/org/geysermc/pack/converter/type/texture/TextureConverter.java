@@ -38,6 +38,7 @@ import org.geysermc.pack.converter.type.texture.transformer.TransformContext;
 import org.geysermc.pack.converter.type.texture.transformer.TransformedTexture;
 import org.geysermc.pack.converter.util.ImageUtil;
 import org.geysermc.pack.converter.util.JsonMappings;
+import org.geysermc.pack.converter.util.PackPaths;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import team.unnamed.creative.ResourcePack;
@@ -152,15 +153,7 @@ public class TextureConverter implements AssetExtractor<Texture>, AssetConverter
      * @throws IOException if {@code combined} is absolute or escapes {@code texturePath}
      */
     static Path resolveSafeRelative(Path texturePath, String combined) throws IOException {
-        if (combined.startsWith(File.separator) || combined.startsWith("/")) {
-            throw new IOException("Refusing absolute path: " + combined);
-        }
-        Path resolved = texturePath.resolve(combined).normalize();
-        Path root = texturePath.normalize();
-        if (!resolved.startsWith(root)) {
-            throw new IOException("Refusing path " + combined + " that escapes " + root);
-        }
-        return resolved;
+        return PackPaths.resolveSafeRelative(texturePath, combined);
     }
 
     @Override
