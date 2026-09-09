@@ -22,7 +22,8 @@ public final class EntityWorker {
             try (var loader = new URLClassLoader(urls, EntityWorker.class.getClassLoader())) {
                 Thread.currentThread().setContextClassLoader(loader);
                 Class<?> model = Class.forName(args[1], false, loader);
-                result.print(EntityGeometry.read(model, args[2]));
+                result.print(args.length > 3 && args[3].equals("layer")
+                        ? ModelPartGeometry.read(model, args[2]) : EntityGeometry.read(model, args[2]));
                 result.flush();
             }
             // Runtime.halt also handles model-created non-daemon threads and shutdown hooks.

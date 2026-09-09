@@ -36,12 +36,21 @@ public final class EntityConverter {
     }
 
     public JsonObject convert(Input input) throws IOException, InterruptedException {
+        return convert(input, "citadel");
+    }
+
+    /** Explicit opt-in to the separate LayerDefinition/ModelPart reader. */
+    public JsonObject convertLayer(Input input) throws IOException, InterruptedException {
+        return convert(input, "layer");
+    }
+
+    private JsonObject convert(Input input, String source) throws IOException, InterruptedException {
         Path arguments = Files.createTempFile("entity-worker-", ".args");
         Process process = null;
         try {
             // An argfile also works with the long client-runtime classpaths used on Windows.
             var args = List.of("-Xmx256m", "-XX:MaxMetaspaceSize=128m", "-cp", classpath(input.workerClasspath()),
-                    EntityWorker.class.getName(), classpath(input.modelClasspath()), input.modelClass(), input.geometryId());
+                    EntityWorker.class.getName(), classpath(input.modelClasspath()), input.modelClass(), input.geometryId(), source);
             Files.write(arguments, args.stream().map(EntityConverter::quoteArgument).toList(), StandardCharsets.UTF_8);
             process = new ProcessBuilder(input.javaExecutable().toString(), "@" + arguments).redirectErrorStream(true).start();
             Process worker = process;
