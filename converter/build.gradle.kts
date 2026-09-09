@@ -40,4 +40,9 @@ tasks.test {
     javaLauncher.set(javaToolchains.launcherFor {
         languageVersion.set(JavaLanguageVersion.of(providers.gradleProperty("testJavaVersion").getOrElse("21")))
     })
+    providers.gradleProperty("entityFixtureClasspath").orNull?.let {
+        systemProperty("entity.fixture.classpath", it)
+    }
+    // Gradle test workers expose only their bootstrap JAR in java.class.path.
+    systemProperty("entity.worker.classpath", sourceSets.test.get().runtimeClasspath.asPath)
 }
